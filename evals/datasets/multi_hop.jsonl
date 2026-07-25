@@ -1,0 +1,1 @@
+{"id": "mh-001", "question": "How do credit policy and security policy interact for vendor onboarding?", "gold_chunk_ids": ["chunk-credit-pt", "chunk-security-en"], "expected_answer_facts": ["review", "secrets"], "should_abstain": false, "language": "en"}

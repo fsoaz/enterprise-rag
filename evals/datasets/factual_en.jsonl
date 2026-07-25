@@ -1,0 +1,2 @@
+{"id": "en-001", "question": "What is the password rotation period?", "gold_chunk_ids": ["chunk-security-en"], "expected_answer_facts": ["90 days"], "should_abstain": false, "language": "en"}
+{"id": "en-002", "question": "Where must production secrets be stored?", "gold_chunk_ids": ["chunk-security-en"], "expected_answer_facts": ["Secrets Manager"], "should_abstain": false, "language": "en"}

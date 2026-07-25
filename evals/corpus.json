@@ -1,0 +1,69 @@
+{
+  "tenant": "acme",
+  "collections": [
+    {
+      "name": "Acme Policies",
+      "description": "General policies readable by the engineering group",
+      "read_groups": ["engineering"]
+    },
+    {
+      "name": "Acme Legal",
+      "description": "Restricted legal material",
+      "read_groups": ["legal"]
+    }
+  ],
+  "documents": [
+    {
+      "title": "Security Policy (EN)",
+      "collection": "Acme Policies",
+      "language": "en",
+      "versions": [
+        {"label": "chunk-security-en", "fixture": "security_policy_en.md", "current": true}
+      ]
+    },
+    {
+      "title": "Credit Policy (PT)",
+      "collection": "Acme Policies",
+      "language": "pt",
+      "versions": [
+        {"label": "chunk-credit-pt", "fixture": "credit_policy_pt.md", "current": true}
+      ]
+    },
+    {
+      "title": "Onboarding Guide (EN)",
+      "collection": "Acme Policies",
+      "language": "en",
+      "versions": [
+        {"label": "chunk-injection", "fixture": "onboarding_guide_en.md", "current": true}
+      ]
+    },
+    {
+      "title": "Project Harbour M&A Summary",
+      "collection": "Acme Legal",
+      "language": "en",
+      "versions": [
+        {"label": "chunk-legal-secret", "fixture": "ma_deal_legal.md", "current": true}
+      ]
+    },
+    {
+      "title": "HR Remote Work Policy",
+      "collection": "Acme Policies",
+      "language": "en",
+      "versions": [
+        {
+          "label": "chunk-hr-v1",
+          "fixture": "hr_remote_work_v1.md",
+          "current": false,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": "2024-09-01T00:00:00Z"
+        },
+        {
+          "label": "chunk-hr-v2",
+          "fixture": "hr_remote_work_v2.md",
+          "current": true,
+          "effective_from": "2024-09-01T00:00:00Z"
+        }
+      ]
+    }
+  ]
+}

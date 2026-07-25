@@ -1,0 +1,2 @@
+{"id": "xl-001", "question": "Qual é o período de rotação de senhas?", "gold_chunk_ids": ["chunk-security-en"], "expected_answer_facts": ["90 days"], "should_abstain": false, "language": "pt"}
+{"id": "xl-002", "question": "Who approves credit limits above 500 thousand?", "gold_chunk_ids": ["chunk-credit-pt"], "expected_answer_facts": ["credit committee"], "should_abstain": false, "language": "en"}

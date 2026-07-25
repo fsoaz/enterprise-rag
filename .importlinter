@@ -1,0 +1,69 @@
+[importlinter]
+root_packages =
+    domain
+    db
+    retrieval
+    llm
+    observability
+    api
+    worker
+    inference
+
+[importlinter:contract:domain-independence]
+name = domain imports nothing from the project
+type = forbidden
+source_modules =
+    domain
+forbidden_modules =
+    db
+    retrieval
+    llm
+    observability
+    api
+    worker
+    inference
+
+[importlinter:contract:packages-no-apps]
+name = packages never import apps
+type = forbidden
+source_modules =
+    domain
+    db
+    retrieval
+    llm
+    observability
+forbidden_modules =
+    api
+    worker
+    inference
+
+[importlinter:contract:api-worker-isolation]
+name = api and worker do not import each other
+type = forbidden
+source_modules =
+    api
+forbidden_modules =
+    worker
+ignore_imports =
+    api.services.ingest -> worker.tasks.ingest
+
+[importlinter:contract:worker-api-isolation]
+name = worker does not import api
+type = forbidden
+source_modules =
+    worker
+forbidden_modules =
+    api
+
+[importlinter:contract:inference-isolation]
+name = inference only may import observability
+type = forbidden
+source_modules =
+    inference
+forbidden_modules =
+    domain
+    db
+    retrieval
+    llm
+    api
+    worker

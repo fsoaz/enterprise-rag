@@ -14,7 +14,8 @@ A RAG system fails quietly. Retrieval gets slightly worse, an ACL filter is drop
 | **Unit** | One function or class. No I/O, no network, no database. | < 30 s total | Every commit |
 | **Integration** | Real Postgres and Redis via testcontainers. Real SQL, real migrations. | < 5 min | Every commit |
 | **Contract** | Committed OpenAPI schema vs. implementation; generated TS types vs. schema | < 30 s | Every commit |
-| **Security** | Tenant isolation, ACL correctness, injection resistance, log hygiene | < 2 min | Every commit — **never skipped** |
+| **Security** *(deterministic)* | Tenant isolation, ACL correctness, log hygiene, tool authorization, injection **contract** tests with mocked model responses | < 2 min | Every commit — **never skipped** |
+| **Adversarial** *(probabilistic)* | Live injection corpus against real models | ~10 min | Nightly and pre-release |
 | **E2E** | Playwright against the full Compose stack | < 10 min | Pre-merge |
 | **Eval** | Offline quality gates on the golden set | smoke < 5 min / full ~30 min | Smoke per PR, full nightly |
 | **Load** | k6 against staging | ~15 min | Pre-release |
@@ -67,6 +68,25 @@ Real Postgres (with `pgvector`) and Redis in testcontainers. Migrations run agai
 
 **This suite is mandatory and never skipped, not even to unblock a hotfix.** Two of its assertions are release gates with a value of zero.
 
+Everything in § 6.1–6.5 is **deterministic**: given the same code it produces the same verdict every run, so it is a legitimate per-commit merge gate. The probabilistic half — measuring whether a real model actually resists a real injection — lives in § 7.5 and runs nightly. Mixing the two would give a merge gate that fails on model variance and passes on luck.
+
+### 6.0 Test the refused request, not the permitted one
+
+**A security control is not covered until a test exercises the request that must fail.**
+
+An access-control test that only asserts the happy path passes identically whether the control is enforced or entirely absent. This is not hypothetical: `require_role` was defined and never attached to any route for the whole first MVP pass, and every existing test still passed, because every existing test used a permitted caller (R-009).
+
+Each control therefore needs a paired assertion:
+
+| Control | Positive | **Negative (the one that matters)** |
+| --- | --- | --- |
+| Role gate | Steward uploads → 202 | Member uploads → **403** |
+| Resource permission | Curator with `write` uploads → 202 | Curator without `write` on that collection → **403** |
+| ACL on metadata reads | Owner lists the document | Non-grantee lists and **does not see it** |
+| Service token | Correct token → 200 | Absent and wrong token → **401** |
+
+The same rule covers the isolation tests below: "tenant A reads its own rows" proves nothing that "tenant A cannot read tenant B's rows" does not.
+
 ### 6.1 Tenant isolation
 
 | Test | Assertion |
@@ -74,9 +94,11 @@ Real Postgres (with `pgvector`) and Redis in testcontainers. Migrations run agai
 | Cross-tenant read | Tenant A's token cannot read any of tenant B's rows, on every tenant-scoped table |
 | **RLS backstop** | The same test passes **with the ORM tenant filter deliberately removed**. This is the test that proves defense in depth is real rather than aspirational. |
 | Raw SQL path | A hand-written query that forgets `tenant_id` is still blocked by RLS |
-| Object storage | A signed URL for tenant A's key cannot be produced or used under tenant B's context |
+| Object storage | A content URL for tenant A's key cannot be produced or used under tenant B's context |
 | Cache | No Redis key is reachable across tenants |
 | Search results | An ANN query under tenant A never returns a tenant B chunk, including at high `ef_search` |
+| **Worker payload tampering** | An ingestion task whose payload has been edited to name tenant B cannot read or write tenant B rows. The tenant context comes from the job row under `rag_app`, never from the payload — see [architecture.md § 4.2](../context/architecture.md#42-layer-2--postgres-row-level-security). |
+| Role privilege | The connection used by ingestion has no `BYPASSRLS`; asserted against `pg_roles`, not assumed from configuration |
 
 ### 6.2 Access control
 
@@ -86,21 +108,27 @@ Real Postgres (with `pgvector`) and Redis in testcontainers. Migrations run agai
 | Default deny | A user with no matching ACL entry gets nothing |
 | **Pre-filter proof** | A user permitted 5% of the corpus still receives a full top-8 — asserted by result count, which is what distinguishes pre-filtering from post-filtering |
 | No count leakage | Result counts and pagination totals are identical whether inaccessible documents exist or not |
-| Revocation | Removing an ACL entry takes effect on the next query (cache invalidated by `acl_version`) |
+| Revocation | Removing an ACL entry takes effect on the **next** query. Asserted against the mechanism, not the outcome: the mutation and the `acl_version` bump commit in one transaction, and the version is re-read from Postgres per request. |
+| Stale version rejected | An `acl_version` supplied from a token or a cached session is never used to key the predicate |
 | Tool ACL | The `search_documents` tool runs under the caller's predicate, not a widened one |
 | Citation ACL | A citation never resolves to a chunk the caller cannot read |
+| Archived exclusion | An archived document is absent from new retrieval but its existing citations still resolve |
+| Erasure tombstone | After erasure, `query_citations` rows survive with content nulled — a historical answer degrades to "source erased" rather than dangling |
+| Legal hold | Erasure is refused with 409 while `legal_hold` is set |
+| **Content-delivery revocation window** | Proxy mode: a revoked user is refused on the next byte range. Presigned mode: the test asserts the **documented** behavior — an already-issued URL remains usable until expiry — so the exposure stays visible rather than being quietly assumed away. See [api_rules.md § 13.1](./api_rules.md#131-presigned-urls-are-bearer-credentials). |
 
-### 6.3 Prompt injection
+### 6.3 Prompt injection — contract tests only
 
-A corpus of adversarial documents in `evals/fixtures/injection/`: instruction override, role confusion, fake system markers, encoded payloads, zero-width characters, instructions inside table cells and image alt text, and a multi-document coordinated attempt.
+Deterministic assertions about how the request is *constructed* and how a hostile response is *handled*. These use mocked model responses and run on every commit. Whether a live model actually resists an attack is measured separately in § 7.5.
 
 | Test | Assertion |
 | --- | --- |
-| Instruction override | A document saying "ignore previous instructions" does not change behavior |
-| Exfiltration | An injected instruction to reveal the system prompt or another document fails |
-| Tool abuse | An injected instruction cannot trigger a tool call the user did not request |
-| Detection | Injection attempts are flagged at ingest and counted in `injection_flagged_total` |
-| Rate | Suite-wide success rate ≤ 1% |
+| Structural placement | Retrieved content appears only in `document` blocks — never in `system`, never concatenated into user text. Asserted on the serialized request body. |
+| Operator channel | Runtime instructions are sent as `role: "system"` messages, not as text inside a user turn |
+| Tool allowlist | The request exposes only read-only tools, ACL-bound, within the call cap |
+| Hostile-response handling | Given a mocked response attempting an unrequested tool call, the loop refuses it |
+| Detection | Injection-shaped text is flagged at ingest and counted in `injection_flagged_total` — a pure heuristic test, no model involved |
+| Egress scan | A mocked answer containing a secret pattern is blocked before leaving the API |
 
 ### 6.4 Log hygiene
 
@@ -132,10 +160,11 @@ Golden set in `evals/datasets/`, fixtures in `evals/fixtures/`. Slices per [arch
 | Correct abstention | no drop > 3 pts | ≥ 0.90 |
 | Cross-tenant leakage | — | **0** (hard gate) |
 | ACL bypass | — | **0** (hard gate) |
-| Injection success | no rise | ≤ 1% |
 | Cost per query | no rise > 20% | ≤ $0.03 median |
 
 A gate breach fails the build. Overriding a gate requires an explicit note in the PR explaining why the new number is correct — and updating the baseline in the same commit, so the override is visible in history.
+
+Injection success rate is deliberately **not** in this table — it is a probabilistic measurement and belongs in § 7.5.
 
 ### 7.3 Judge discipline
 
@@ -148,6 +177,21 @@ A gate breach fails the build. Overriding a gate requires an explicit note in th
 
 Baseline metrics are committed to `evals/baselines/<git-sha>.json`. The smoke gate compares against the baseline of `main`. Updating a baseline is a deliberate, reviewed commit.
 
+### 7.5 Adversarial evaluation (probabilistic)
+
+The live half of injection testing: the corpus in `evals/fixtures/injection/` — instruction override, role confusion, fake system markers, encoded payloads, zero-width characters, instructions in table cells and image alt text, and a multi-document coordinated attempt — run against **real models**.
+
+| Property | Value |
+| --- | --- |
+| Cadence | Nightly and pre-release |
+| Gate | Success rate ≤ 1%, and no rise vs. the previous run |
+| Merge-blocking | **No** |
+| On breach | Opens an issue; blocks release, not merge |
+
+**A probabilistic signal is never a per-commit merge gate.** The same commit can pass at 0.4% and fail at 1.2% on model variance alone, which would train the team to re-run CI until it goes green — the worst possible outcome for a security signal. Per-commit protection comes from the deterministic contract tests in § 6.3; this tier answers the different question of whether the defenses actually hold against a live model, and it answers it on a cadence where a real regression is investigated rather than retried.
+
+Any successful injection is triaged as a `critical` finding regardless of the aggregate rate.
+
 ## 8. Determinism
 
 | Tier | LLM handling |
@@ -155,7 +199,8 @@ Baseline metrics are committed to `evals/baselines/<git-sha>.json`. The smoke ga
 | Unit | Fully mocked; fixed response objects |
 | Integration | Recorded cassettes; no live calls |
 | Contract | No LLM involved |
-| Security | Mocked, except the injection suite which may use a live judge in nightly |
+| Security (deterministic) | Fully mocked. No live call, by definition — that is what makes it a merge gate. |
+| Adversarial (probabilistic) | **Live calls.** Nightly and pre-release only. |
 | E2E | Cassettes by default; a live-mode flag exists for manual verification |
 | **Eval** | **Live calls.** This is the only tier that spends money, and it is the point of the tier. |
 
@@ -165,19 +210,26 @@ Other determinism rules: fixed random seeds; injected clock; no test depends on 
 
 ## 9. Performance Tests
 
+Every performance number in this project is meaningless without the workload that produced it. A latency target can always be met by shrinking the corpus, dropping concurrency, or measuring a warm cache — so each target names a **profile** from [product.md § 7.4](../context/product.md#74-performance--cost) and is only comparable to another number from the same profile.
+
 ### 9.1 Micro-benchmarks (CI)
 
-`pytest-benchmark` on retrieval SQL against a seeded 100k-chunk corpus. Regression threshold 20%. Catches an accidentally dropped index or a query plan flip.
+`pytest-benchmark` on retrieval SQL against the `dev-cpu` corpus (10k chunks, seeded, warm). Regression threshold 20%. Catches an accidentally dropped index or a query plan flip — it is a *relative* guard, not an SLO measurement.
 
 ### 9.2 Load tests (k6, pre-release, against staging)
 
+Staging runs the **`cloud-gpu`** profile. Targets are read from the profile table rather than restated here, so the two cannot drift apart.
+
 | Scenario | Shape | Target |
 | --- | --- | --- |
-| Steady chat | 20 concurrent users, 10 min | p95 end-to-end ≤ 4 s, TTFT p95 ≤ 1.2 s |
-| Search burst | 100 rps for 2 min | p95 retrieval ≤ 400 ms, no 5xx |
-| Ingestion | 50 documents concurrently | No job failures, queue drains |
-| Mixed | Chat + search + ingest simultaneously | No degradation beyond targets |
+| Steady chat | Profile concurrency (20 users), 10 min | `cloud-gpu` TTFT and end-to-end targets |
+| Search burst | 100 rps for 2 min | `cloud-gpu` retrieval-only target, no 5xx |
+| Ingestion | 50 documents concurrently | Profile ingestion throughput; no job failures, queue drains |
+| Mixed | Chat + search + ingest simultaneously | No degradation beyond profile targets |
 | Soak | 4 hours at 50% load | No memory growth, no connection-pool exhaustion |
+| Cold start | First request after deploy | Recorded, not gated — cold TTFT is expected to exceed the warm target |
+
+A load-test report that does not state its profile, corpus size, and warm/cold status is rejected in review.
 
 ### 9.3 Degradation drills
 
@@ -214,7 +266,9 @@ Plus accessibility assertions on each: keyboard navigation reaches every control
 ## 12. CI Pipeline
 
 ```text
-lint → typecheck → unit → integration → contract → security → eval-smoke → build → e2e
+per commit:  lint → typecheck → unit → integration → contract → security → eval-smoke → build → e2e
+nightly:     eval-full → adversarial
+pre-release: eval-full → adversarial → load
 ```
 
 | Stage | Blocks merge | Notes |
@@ -223,11 +277,12 @@ lint → typecheck → unit → integration → contract → security → eval-s
 | unit | Yes | |
 | integration | Yes | testcontainers |
 | contract | Yes | OpenAPI drift |
-| **security** | Yes | Never skipped |
-| eval-smoke | Yes | Regression gates |
+| **security** (deterministic) | Yes | Never skipped. Fully mocked — no live model call, which is what makes it a legitimate gate. |
+| eval-smoke | Yes | Regression gates. **Not yet wired** — the `integration-db` job has no `inference` service, so the harness cannot embed (R-031). |
 | build | Yes | Images build and start |
 | e2e | Yes | On PRs touching `apps/web` or `apps/api` |
 | eval-full | No (reports) | Nightly; opens an issue on regression |
+| **adversarial** (probabilistic) | **No** | Nightly and pre-release. Blocks **release**, not merge — see § 7.5. |
 | load | No | Pre-release, manual |
 
 ## 13. Definition of Done (testing view)
@@ -241,4 +296,8 @@ Mirrors [conventions.md § 13](./conventions.md#13-definition-of-done), from the
 - [ ] Anything touching retrieval or generation has an eval-smoke result attached
 - [ ] Migrations exercised up **and** down
 - [ ] No new `skip` or `xfail` without a linked task explaining it
+- [ ] Every new access control has a **negative** test — the request that must be refused (§ 6.0)
+- [ ] A conditional skip distinguishes *absent* from *misconfigured*: a dependency that is reachable but rejecting must fail, not skip
+- [ ] Evidence records the skip count and the environment, not just the pass count
+- [ ] Tests do not depend on row order or accumulated state in a long-lived dev database
 - [ ] Evidence recorded in [test_evidence.md](../execution/test_evidence.md)

@@ -1,0 +1,152 @@
+name: enterprise-rag
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "${POSTGRES_PUBLISH_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: enterprise_rag
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d enterprise_rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PUBLISH_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_API_PUBLISH_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PUBLISH_PORT:-9001}:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done;
+      mc mb --ignore-existing local/enterprise-rag;
+      exit 0;
+      "
+    restart: "no"
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: start-dev
+    ports:
+      - "8080:8080"
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: 8080
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.api
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../../.env.example
+    environment:
+      DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@postgres:5432/enterprise_rag
+      DATABASE_URL_SYNC: postgresql+psycopg://rag_app:rag_app@postgres:5432/enterprise_rag
+      DATABASE_URL_MIGRATE: postgresql+asyncpg://rag_migrate:rag_migrate@postgres:5432/enterprise_rag
+      DATABASE_URL_MAINT: postgresql+asyncpg://rag_maint:rag_maint@postgres:5432/enterprise_rag
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      S3_ENDPOINT_URL: http://minio:9000
+      INFERENCE_BASE_URL: http://inference:8001
+      INFERENCE_SERVICE_TOKEN: dev-inference-token
+      OIDC_ISSUER: http://keycloak:8080/realms/enterprise-rag
+      OIDC_JWKS_URL: http://keycloak:8080/realms/enterprise-rag/protocol/openid-connect/certs
+      # Local demo stack only — trusts the X-Dev-User header. Never enable off a dev machine.
+      DEV_AUTH_BYPASS: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.api
+    env_file:
+      - ../../.env.example
+    environment:
+      DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@postgres:5432/enterprise_rag
+      DATABASE_URL_SYNC: postgresql+psycopg://rag_app:rag_app@postgres:5432/enterprise_rag
+      DATABASE_URL_MIGRATE: postgresql+asyncpg://rag_migrate:rag_migrate@postgres:5432/enterprise_rag
+      DATABASE_URL_MAINT: postgresql+asyncpg://rag_maint:rag_maint@postgres:5432/enterprise_rag
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      S3_ENDPOINT_URL: http://minio:9000
+      INFERENCE_BASE_URL: http://inference:8001
+      INFERENCE_SERVICE_TOKEN: dev-inference-token
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "worker.celery_app.celery_app", "worker", "--loglevel=INFO"]
+
+  inference:
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.inference
+    ports:
+      - "8001:8001"
+    environment:
+      LOG_LEVEL: INFO
+      INFERENCE_SERVICE_TOKEN: dev-inference-token
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/compose/Dockerfile.web
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  minio_data:

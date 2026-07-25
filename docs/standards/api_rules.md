@@ -28,9 +28,14 @@ Never from a path parameter, a query string, a request body, or a header. An end
 
 ### 2.3 Authorization
 
-- Coarse-grained role checks happen in a route dependency (`require_role("steward")`).
+- Coarse-grained role checks happen in a route dependency (`require_role(...)`), exposed as the aliases `CuratorUser` (`admin`|`steward`) and `AclAdminUser` (`admin`). Role capabilities are tabulated in [architecture.md § 5.1](../context/architecture.md#51-subjects-and-resources).
+- **Roles come from `role_assignments` in Postgres, never from the token's `roles[]` claim.** The claim is still required for the token to be well-formed, but authorization reads the database so that `require_role` and the retrieval predicate cannot disagree about the same caller.
 - Fine-grained document/collection permissions are **not** checked as a gate before retrieval — they are compiled into the retrieval predicate. See [architecture.md § 5.3](../context/architecture.md#53-resolution-to-a-retrieval-predicate).
+- **A write endpoint checks both**: the role gate *and* an ACL permission check on the target resource. A curator role is not a grant on every collection.
+- Endpoints that list resource *metadata* apply the same ACL predicate as `/search`. Titles and collection membership are not free — see the `read` column in [§ 12](#12-endpoint-inventory-planned-v1).
 - A resource the caller cannot read returns **404, not 403**, when revealing existence would itself leak information. Use 403 only when the caller is known to be aware the resource exists.
+
+**A role dependency must be attached to the route, not merely defined.** `require_role` existed unused for the whole first MVP pass, leaving every write endpoint — including ACL entry creation — open to any authenticated user (R-009). Review greps for the dependency and confirms a call site; the regression test asserts the *refused* request, not the permitted one.
 
 ## 3. Resource Conventions
 
@@ -198,6 +203,8 @@ Job states: `queued → running → succeeded | failed | cancelled`. A `failed` 
 
 Phase column refers to [roadmap.md](../context/roadmap.md).
 
+**Role column** names the minimum role required by the route dependency, where one is implemented today. `—` means any authenticated caller, still scoped by RLS and (where marked) the ACL predicate. A role is necessary but never sufficient on writes: see [§ 2.3](#23-authorization).
+
 ### Health & meta
 
 | Method | Path | Purpose | Phase |
@@ -233,25 +240,30 @@ Phase column refers to [roadmap.md](../context/roadmap.md).
 
 ### Collections
 
-| Method | Path | Purpose | Phase |
-| --- | --- | --- | --- |
-| `GET` | `/api/v1/collections` · `POST` · `PATCH /{id}` · `DELETE /{id}` | CRUD | 1 |
-| `GET` | `/api/v1/collections/{id}/acl` · `PUT` | Read / replace ACL entries | 2 |
+| Method | Path | Purpose | Role | Phase |
+| --- | --- | --- | --- | --- |
+| `GET` | `/api/v1/collections` | List collections in the tenant | — | 1 |
+| `POST` | `/api/v1/collections` · `PATCH /{id}` · `DELETE /{id}` | Create / update / remove | `steward` | 1 |
+| `GET` | `/api/v1/collections/{id}/acl` · `PUT` | Read / replace ACL entries | `admin` | 2 |
+| `POST` | `/api/v1/acl/entries` · `GET` | Create / list ACL grants. **Admin only** — a self-grant here widens the caller's own retrieval predicate. | `admin` | 2 |
 
 ### Documents
 
-| Method | Path | Purpose | Phase |
-| --- | --- | --- | --- |
-| `POST` | `/api/v1/documents` | Upload (multipart) → 202 + job | 1 |
-| `GET` | `/api/v1/documents` | List, filterable by collection/status/language/staleness | 1 |
-| `GET` | `/api/v1/documents/{id}` | Detail incl. current version | 1 |
-| `PATCH` | `/api/v1/documents/{id}` | Metadata, owner, review interval | 1 |
-| `DELETE` | `/api/v1/documents/{id}` | Remove document and all versions | 1 |
-| `GET` | `/api/v1/documents/{id}/versions` | Version history / supersession chain | 1 |
-| `GET` | `/api/v1/documents/{id}/versions/{vid}/content` | Signed URL to original bytes | 1 |
-| `POST` | `/api/v1/documents/{id}/reindex` | Force re-chunk + re-embed | 1 |
-| `GET` | `/api/v1/documents/{id}/acl` · `PUT` | Document-level ACL overrides | 2 |
-| `POST` | `/api/v1/documents/{id}/review` | Mark reviewed; resets staleness | 5 |
+| Method | Path | Purpose | Role | Phase |
+| --- | --- | --- | --- | --- |
+| `POST` | `/api/v1/documents` | Upload (multipart) → 202 + job. Also requires ACL `write` on the target collection; 413 past `MAX_UPLOAD_BYTES`, 415 outside the PDF/MD/TXT allowlist. | `steward` | 1 |
+| `GET` | `/api/v1/documents` | List, filterable by collection/status/language/staleness. **ACL-filtered.** | — | 1 |
+| `GET` | `/api/v1/documents/{id}` | Detail incl. current version. **ACL-filtered** (404 when not readable). | — | 1 |
+| `PATCH` | `/api/v1/documents/{id}` | Metadata, owner, review interval | `steward` | 1 |
+| `POST` | `/api/v1/documents/{id}/archive` | Tombstone. Excluded from new retrieval; versions, chunks, and citation targets preserved. Reversible. **ACL-filtered.** | `steward` | 1 |
+| `POST` | `/api/v1/documents/{id}/unarchive` | Restore an archived document to retrieval. **ACL-filtered.** | `steward` | 1 |
+| `DELETE` | `/api/v1/documents/{id}` | **Not offered.** Returns 405 with a problem body pointing at `/archive` and `/erase` — see [architecture.md § 6.4](../context/architecture.md#64-removal-archival-not-deletion) | — | 1 |
+| `GET` | `/api/v1/documents/{id}/versions` | Version history / supersession chain | — | 1 |
+| `GET` | `/api/v1/documents/{id}/versions/{vid}/content` | Signed URL to original bytes | — | 1 |
+| `GET` | `/api/v1/documents/{id}/jobs` | Ingestion job history for the document. **ACL-filtered.** | — | 1 |
+| `POST` | `/api/v1/documents/{id}/reindex` | Force re-chunk + re-embed | `steward` | 1 |
+| `GET` | `/api/v1/documents/{id}/acl` · `PUT` | Document-level ACL overrides | `admin` | 2 |
+| `POST` | `/api/v1/documents/{id}/review` | Mark reviewed; resets staleness | `steward` | 5 |
 
 ### Ingestion jobs
 
@@ -285,6 +297,8 @@ Phase column refers to [roadmap.md](../context/roadmap.md).
 
 | Method | Path | Purpose | Phase |
 | --- | --- | --- | --- |
+| `POST` | `/api/v1/admin/documents/{id}/erase` | **Privileged, irreversible.** Legal/privacy erasure: purges bytes, chunk text, and embeddings; retains tombstones, nulled citations, and an `erasure_log` entry. Refused with 409 under `legal_hold`. | 1 |
+| `GET` | `/api/v1/admin/erasures` | Erasure audit log | 1 |
 | `GET` | `/api/v1/admin/costs` | Aggregated spend by tenant / model / purpose / period | 5 |
 | `GET` | `/api/v1/admin/quotas` · `PUT` | Rate limits and monthly budgets | 5 |
 | `GET` | `/api/v1/admin/usage` | Query volume, latency percentiles, verdict distribution | 5 |
@@ -304,8 +318,27 @@ Phase column refers to [roadmap.md](../context/roadmap.md).
 | CORS | Explicit origin allowlist. `*` is never permitted with credentials. |
 | Headers | `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Strict-Transport-Security`, and a CSP on the web app |
 | Upload limits | 100 MB per file, 500 pages per document, MIME sniffing on content and not on the filename extension |
-| Signed URLs | Document content URLs expire in 15 minutes and are scoped to the requesting user |
+| Document content delivery | **Proxied by default** — `GET /documents/{id}/versions/{vid}/content` streams through the authenticated API, so every access is ACL-checked at request time and lands in the audit log. See the note below before enabling the presigned alternative. |
 | Request size | 10 MB JSON body limit |
 | Timeouts | Per [architecture.md § 13.1](../context/architecture.md#131-timeouts) |
 | Egress scan | Answers pass a secret/PII pattern check before leaving the API |
 | Audit | Every mutating admin action is logged with actor, target, and before/after |
+
+### 13.1 Presigned URLs are bearer credentials
+
+An S3 presigned URL **cannot be scoped to a user**. It is a bearer credential: whoever holds the string can fetch the object until it expires, with no further authentication and no way to distinguish the original requester from anyone the link was forwarded to. Any documentation claiming otherwise is wrong, and this section exists because an earlier draft of this file made exactly that claim.
+
+Two delivery modes, with the trade stated plainly:
+
+| Mode | Access control | Audit | Cost |
+| --- | --- | --- | --- |
+| **Proxy through the API** *(default)* | Re-checked on every byte range requested | Every access logged | API bandwidth and a streaming handler |
+| **Presigned URL** *(opt-in)* | None after issuance — object-scoped, time-limited, bearer | Issuance is logged; the fetch itself is not | Offloads bandwidth to S3 |
+
+If the presigned mode is enabled, these consequences are accepted explicitly and must appear in the tenant's security documentation:
+
+- **A URL issued before an ACL revocation stays usable until it expires** (≤ 15 minutes). Revocation is not retroactive over already-issued links.
+- A forwarded or logged URL is a working credential for its remaining lifetime.
+- Downloads do not appear in the access audit trail.
+
+Because the audit requirement in [product.md § 9](../context/product.md#9-non-functional-requirements) says every access must be reconstructable, the proxy is the default and presigning is a per-tenant opt-in for bandwidth-sensitive deployments — never the other way round.
