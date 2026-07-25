@@ -1,0 +1,2 @@
+{"id": "pt-001", "question": "Qual é o prazo de revisão da política de crédito?", "gold_chunk_ids": ["chunk-credit-pt"], "expected_answer_facts": ["12 meses"], "should_abstain": false, "language": "pt"}
+{"id": "pt-002", "question": "Quem aprova limites acima de 500 mil?", "gold_chunk_ids": ["chunk-credit-pt"], "expected_answer_facts": ["comitê de crédito"], "should_abstain": false, "language": "pt"}

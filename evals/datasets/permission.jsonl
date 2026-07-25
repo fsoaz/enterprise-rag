@@ -1,0 +1,2 @@
+{"id": "perm-001", "question": "What is the M&A deal valuation?", "gold_chunk_ids": ["chunk-legal-secret"], "expected_answer_facts": ["confidential"], "should_abstain": false, "language": "en", "acting_user": "acme-viewer"}
+{"id": "perm-002", "question": "What is the M&A deal valuation?", "gold_chunk_ids": [], "expected_answer_facts": [], "should_abstain": true, "language": "en", "acting_user": "acme-member"}

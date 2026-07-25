@@ -1,0 +1,122 @@
+[project]
+name = "enterprise-rag"
+version = "0.1.0"
+description = "Enterprise RAG Document Intelligence System"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "enterprise-rag-domain",
+    "enterprise-rag-db",
+    "enterprise-rag-retrieval",
+    "enterprise-rag-llm",
+    "enterprise-rag-observability",
+    "enterprise-rag-api",
+    "enterprise-rag-worker",
+    "enterprise-rag-inference",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.28.0",
+    "ruff>=0.9.0",
+    "mypy>=1.14.0",
+    "import-linter>=2.1",
+    "types-redis",
+]
+
+[tool.uv.workspace]
+members = [
+    "apps/api",
+    "apps/worker",
+    "apps/inference",
+    "packages/domain",
+    "packages/db",
+    "packages/retrieval",
+    "packages/llm",
+    "packages/observability",
+]
+
+[tool.uv.sources]
+enterprise-rag-domain = { workspace = true }
+enterprise-rag-db = { workspace = true }
+enterprise-rag-retrieval = { workspace = true }
+enterprise-rag-llm = { workspace = true }
+enterprise-rag-observability = { workspace = true }
+enterprise-rag-api = { workspace = true }
+enterprise-rag-worker = { workspace = true }
+enterprise-rag-inference = { workspace = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["apps/api/tests", "apps/worker/tests", "apps/inference/tests", "packages", "tests", "evals"]
+pythonpath = [
+    "apps/api/src",
+    "apps/worker/src",
+    "apps/inference/src",
+    "packages/domain/src",
+    "packages/db/src",
+    "packages/retrieval/src",
+    "packages/llm/src",
+    "packages/observability/src",
+    ".",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    "integration: requires a reachable Postgres (DATABASE_URL)",
+]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+strict = true
+mypy_path = [
+    "packages/domain/src",
+    "packages/db/src",
+    "packages/retrieval/src",
+    "packages/llm/src",
+    "packages/observability/src",
+    "apps/api/src",
+    "apps/worker/src",
+    "apps/inference/src",
+]
+packages = [
+    "domain",
+    "db",
+    "retrieval",
+    "llm",
+    "observability",
+    "api",
+    "worker",
+    "inference",
+]
+
+[[tool.mypy.overrides]]
+module = ["celery.*", "redis.*", "boto3.*", "botocore.*", "pypdf.*"]
+ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = [
+    "apps/api/src",
+    "apps/worker/src",
+    "apps/inference/src",
+    "packages/domain/src",
+    "packages/db/src",
+    "packages/retrieval/src",
+    "packages/llm/src",
+    "packages/observability/src",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S101"]
+"**/migrations/**" = ["E501"]
+"packages/db/src/db/models.py" = ["E501"]

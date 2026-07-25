@@ -1,0 +1,161 @@
+"""Retrieval orchestration — configurable strategies (architecture § 7.9)."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from domain.types import (
+    DEFAULT_RRF_K,
+    DEFAULT_TOP_K_RERANK,
+    DEFAULT_TOP_K_RETRIEVAL,
+    RetrievalStrategy,
+)
+from retrieval.acl import resolve_acl
+from retrieval.dense import dense_search, embed_query
+from retrieval.fusion import reciprocal_rank_fusion
+from retrieval.lexical import lexical_search
+from retrieval.rerank import rerank_documents
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalHit:
+    chunk_id: UUID
+    document_id: UUID
+    document_version_id: UUID
+    body: str
+    score: float
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalResult:
+    hits: list[RetrievalHit]
+    strategy: str
+    acl_version: int
+
+
+def _detect_language_hint(query: str) -> str:
+    # Lightweight reuse of PT markers without importing worker.
+    pt_markers = {"de", "que", "não", "nao", "para", "uma", "política", "politica", "segurança"}
+    tokens = {t.lower().strip(".,;:!?") for t in query.split()}
+    return "pt" if tokens & pt_markers else "en"
+
+
+async def retrieve(
+    session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    user_id: UUID,
+    query: str,
+    strategy: RetrievalStrategy | str = RetrievalStrategy.HYBRID_RRF,
+    top_k: int = DEFAULT_TOP_K_RERANK,
+    retrieval_k: int = DEFAULT_TOP_K_RETRIEVAL,
+    rrf_k: int = DEFAULT_RRF_K,
+) -> RetrievalResult:
+    strategy_value = strategy.value if isinstance(strategy, RetrievalStrategy) else str(strategy)
+    acl = await resolve_acl(session, tenant_id=tenant_id, user_id=user_id)
+    lang = _detect_language_hint(query)
+
+    dense_hits: list[RetrievalHit] = []
+    lexical_hits: list[RetrievalHit] = []
+
+    need_dense = strategy_value in {
+        RetrievalStrategy.DENSE_ONLY.value,
+        RetrievalStrategy.HYBRID_RRF.value,
+        RetrievalStrategy.HYBRID_RERANK.value,
+    }
+    need_lexical = strategy_value in {
+        RetrievalStrategy.LEXICAL_ONLY.value,
+        RetrievalStrategy.HYBRID_RRF.value,
+        RetrievalStrategy.HYBRID_RERANK.value,
+    }
+
+    if need_dense:
+        vector = await embed_query(session, query)
+        for dhit in await dense_search(
+            session,
+            tenant_id=tenant_id,
+            query_vector=vector,
+            acl=acl,
+            top_k=retrieval_k,
+        ):
+            dense_hits.append(
+                RetrievalHit(
+                    chunk_id=dhit.chunk_id,
+                    document_id=dhit.document_id,
+                    document_version_id=dhit.document_version_id,
+                    body=dhit.body,
+                    score=dhit.score,
+                )
+            )
+
+    if need_lexical:
+        for lhit in await lexical_search(
+            session,
+            tenant_id=tenant_id,
+            query=query,
+            acl=acl,
+            top_k=retrieval_k,
+            language_hint=lang,
+        ):
+            lexical_hits.append(
+                RetrievalHit(
+                    chunk_id=lhit.chunk_id,
+                    document_id=lhit.document_id,
+                    document_version_id=lhit.document_version_id,
+                    body=lhit.body,
+                    score=lhit.score,
+                )
+            )
+
+    if strategy_value == RetrievalStrategy.DENSE_ONLY.value:
+        hits = dense_hits[:top_k]
+    elif strategy_value == RetrievalStrategy.LEXICAL_ONLY.value:
+        hits = lexical_hits[:top_k]
+    else:
+        # hybrid_rrf / hybrid_rerank
+        by_id: dict[UUID, RetrievalHit] = {h.chunk_id: h for h in (*dense_hits, *lexical_hits)}
+        fused = reciprocal_rank_fusion(
+            [
+                [h.chunk_id for h in dense_hits],
+                [h.chunk_id for h in lexical_hits],
+            ],
+            k=rrf_k,
+        )
+        fused_hits = [
+            RetrievalHit(
+                chunk_id=cid,
+                document_id=by_id[cid].document_id,
+                document_version_id=by_id[cid].document_version_id,
+                body=by_id[cid].body,
+                score=score,
+            )
+            for cid, score in fused
+            if cid in by_id
+        ]
+
+        if strategy_value == RetrievalStrategy.HYBRID_RERANK.value and fused_hits:
+            # Rerank up to retrieval_k candidates, keep top_k.
+            candidates = fused_hits[:retrieval_k]
+            reranked = await rerank_documents(
+                query,
+                [h.body for h in candidates],
+                top_k=min(top_k, len(candidates)),
+            )
+            hits = [
+                RetrievalHit(
+                    chunk_id=candidates[r.index].chunk_id,
+                    document_id=candidates[r.index].document_id,
+                    document_version_id=candidates[r.index].document_version_id,
+                    body=candidates[r.index].body,
+                    score=r.score,
+                )
+                for r in reranked
+                if 0 <= r.index < len(candidates)
+            ]
+        else:
+            hits = fused_hits[:top_k]
+
+    return RetrievalResult(hits=hits, strategy=strategy_value, acl_version=acl.acl_version)

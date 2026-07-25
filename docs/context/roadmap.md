@@ -11,16 +11,44 @@ Phases are **dependency-ordered, not calendar-scheduled**. Each phase lists its 
 
 Task IDs follow `T-<phase><seq>` (see [tasks/README.md](../tasks/README.md)). Size is a rough relative indicator: **S** ≈ a day, **M** ≈ a few days, **L** ≈ a week or more.
 
-| Phase | Theme | Size | Unlocks |
-| --- | --- | --- | --- |
-| [0](#phase-0--foundation) | Foundation | M | Everything |
-| [1](#phase-1--ingestion--versioning) | Ingestion & versioning | L | A corpus to search |
-| [2](#phase-2--retrieval-core) | Retrieval core | L | Permission-aware search |
-| [3](#phase-3--generation--citations) | Generation & citations | L | Answers |
-| [4](#phase-4--evaluation) | Evaluation | M | Evidence that it works |
-| [5](#phase-5--operations) | Operations | M | Production readiness |
-| [6](#phase-6--user-interfaces) | User interfaces | L | Demonstrability |
-| [7](#phase-7--cloud--hardening) | Cloud & hardening | M | Deployment |
+### Two release boundaries
+
+The full v1 as originally specified — six file formats, OCR, freshness conflict detection, budgets, three UIs, Terraform, and the full degradation ladder — is a multi-quarter product, not a first release. Attempting it in one pass is the single largest risk to ever shipping anything deployable.
+
+The work is therefore cut into two milestones. **Nothing is deleted; the differentiators all survive in Milestone A.** What moves is breadth: fewer file formats, no OCR, one UI instead of three, Compose instead of ECS.
+
+| | **Milestone A — Portfolio release** | **Milestone B — Enterprise expansion** |
+| --- | --- | --- |
+| Goal | Deployable, demonstrable, complete on its own | Production breadth |
+| Ingestion | PDF, Markdown, plain text | + DOCX, HTML, EML, OCR |
+| Retrieval | Hybrid + RRF + rerank; collection **and document-level** ACL | + query expansion, sparse third arm |
+| Generation | Citations, streaming, injection defense, groundedness, abstention | + full degradation ladder |
+| Evaluation | Bilingual golden set, metrics harness, strategy comparison | + eval dashboard UI |
+| Cost | `cost_ledger` writes on every call | + budgets, quotas, cost UI |
+| Freshness | Archival and version chain | + staleness scoring, conflict detection |
+| UI | Chat with citations + minimal document admin | + eval dashboard, full admin |
+| Deploy | Docker Compose | Terraform → ECS, load testing |
+
+Two items sit in Milestone A that a purely minimal cut would defer, and both are deliberate:
+
+- **Document-level deny overrides.** `acl_entries` is already polymorphic, so building deny-precedence now costs little — and it is precisely where an access-control bug would live. Retrofitting its security tests onto a shipped system is worse than writing them once, up front.
+- **The `cost_ledger` table.** "No un-ledgered LLM call" is a stated design principle ([architecture.md § 1](./architecture.md#1-design-principles)); the ledger is one table and one write. Only budget *enforcement* and the cost UI are expensive, and those defer.
+
+### Phase map
+
+| Phase | Theme | Milestone | Size | Unlocks |
+| --- | --- | --- | --- | --- |
+| [0](#phase-0--foundation) | Foundation | **A** | M | Everything |
+| [1](#phase-1--ingestion--versioning) | Ingestion & versioning | **A** | M | A corpus to search |
+| [2](#phase-2--retrieval-core) | Retrieval core | **A** | L | Permission-aware search |
+| [3](#phase-3--generation--citations) | Generation & citations | **A** | L | Answers |
+| [4](#phase-4--evaluation) | Evaluation | **A** | M | Evidence that it works |
+| [6a](#phase-6--user-interfaces) | Chat UI + minimal admin | **A** | M | Demonstrability |
+| [5](#phase-5--operations) | Operations | B | M | Production readiness |
+| [6b](#phase-6--user-interfaces) | Eval dashboard + full admin | B | M | Full surface |
+| [7](#phase-7--cloud--hardening) | Cloud & hardening | B | M | Deployment at scale |
+
+**Milestone A exit:** a Compose deploy where two isolated tenants ask bilingual questions, receive cited answers from documents they are permitted to see, watch the system abstain when the corpus cannot support an answer, and see the eval numbers that prove it — with every LLM call ledgered.
 
 ---
 
@@ -57,15 +85,18 @@ Task IDs follow `T-<phase><seq>` (see [tasks/README.md](../tasks/README.md)). Si
 
 ## Phase 1 — Ingestion & Versioning
 
+**Milestone A.** DOCX, HTML, EML, and OCR defer to Milestone B — three formats are enough to prove the pipeline, and OCR in particular is a tarpit that would dominate this phase.
+
 **Goal:** Documents get into the system, become searchable chunks, and carry a version history.
 
 ### Deliverables
 
 - `POST /api/v1/documents` upload → S3/MinIO → `202 Accepted` + job resource
 - Ingestion pipeline in `worker`, one Celery task per stage with independent retries:
-  `download → parse → ocr (conditional) → chunk → embed → index`
-- Parsers: PDF, DOCX, HTML, Markdown, plain text, EML
-- OCR path for image-only PDFs
+  `download → parse → chunk → embed → index`
+- Parsers: **PDF, Markdown, plain text**
+- Archival (`archived_at`) and the privileged erasure path — see [architecture.md § 6.4](./architecture.md#64-removal-archival-not-deletion). Deletion semantics ship with versioning, not after it: a system that can ingest but cannot correctly remove is not shippable.
+- Ingestion tasks run under the `rag_app` role with tenant context from the job row, never the payload
 - Chunking: fixed-token with overlap (default 512 tokens / 64 overlap), section-path metadata preserved
 - **Real BGE-M3** in `inference`, with correct `query` vs. `passage` instruction prefixes
 - `chunk_embeddings` written with `model_name` + `model_version`
@@ -81,16 +112,20 @@ Task IDs follow `T-<phase><seq>` (see [tasks/README.md](../tasks/README.md)). Si
 - [ ] Re-uploading identical bytes is a no-op (no duplicate version)
 - [ ] Uploading a modified file creates v2 and marks v1 superseded, with v1's chunks retained
 - [ ] A corrupt file produces a `failed` job with a readable error, not a silent drop
-- [ ] Ingestion throughput ≥ 100 pages/min/worker on text PDFs
+- [ ] Ingestion throughput meets the `dev-cpu` profile target (≥ 25 pages/min/worker) on text PDFs
+- [ ] Archiving a document removes it from new retrieval while its existing citations still resolve
+- [ ] `DELETE /documents/{id}` returns 405 pointing at `/archive`
 - [ ] Every chunk carries `tenant_id`, `document_version_id`, `language`, and a populated `search_vector`
 
 **Stories:** KW-1, KW-2, KW-6
 
-**Tasks:** `T-101` upload endpoint + object storage · `T-102` parser suite · `T-103` OCR path · `T-104` chunker · `T-105` BGE-M3 in inference · `T-106` embed + index stage · `T-107` version chain + supersession · `T-108` job status API · `T-109` injection heuristic
+**Tasks:** `T-101` upload endpoint + object storage · `T-102` parser suite · `T-104` chunker · `T-105` BGE-M3 in inference · `T-106` embed + index stage · `T-107` version chain + supersession · `T-108` job status API · `T-109` injection heuristic
 
 ---
 
 ## Phase 2 — Retrieval Core
+
+**Milestone A.** Query expansion and the sparse third arm defer to Milestone B.
 
 **Goal:** Hybrid, reranked, permission-aware search. This phase contains the system's most important correctness property.
 
@@ -117,7 +152,7 @@ Task IDs follow `T-<phase><seq>` (see [tasks/README.md](../tasks/README.md)). Si
 - [ ] A user with access to 5% of the corpus still gets a full top-8 (pre-filtering, not post-filtering — verified by a test that counts results)
 - [ ] Result counts do not leak the existence of inaccessible documents
 - [ ] Retrieval-only p95 ≤ 400 ms on a 100k-chunk corpus
-- [ ] Reranking measurably improves `nDCG@10` over `hybrid_rrf` alone
+- [ ] Reranking measurably improves `nDCG@10` over `hybrid_rrf` alone — **blocked on T-206**; until then the default is `hybrid_rrf`, since the rerank stub is an identity pass-through
 
 **Stories:** KS-5, KW-4
 
@@ -126,6 +161,8 @@ Task IDs follow `T-<phase><seq>` (see [tasks/README.md](../tasks/README.md)). Si
 ---
 
 ## Phase 3 — Generation & Citations
+
+**Milestone A.** Includes `cost_ledger` writes; budget *enforcement* and the cost UI defer to Milestone B.
 
 **Goal:** Cited, streamed, grounded answers with injection defense.
 
@@ -160,6 +197,8 @@ Task IDs follow `T-<phase><seq>` (see [tasks/README.md](../tasks/README.md)). Si
 
 ## Phase 4 — Evaluation
 
+**Milestone A.** The harness and the strategy comparison ship here; the dashboard UI is Phase 6b.
+
 **Goal:** Evidence. Every quality claim in [product.md § 7](./product.md#7-success-metrics) becomes a measured number.
 
 ### Deliverables
@@ -175,13 +214,15 @@ Task IDs follow `T-<phase><seq>` (see [tasks/README.md](../tasks/README.md)). Si
 
 ### Exit criteria
 
-- [ ] Full eval run completes and writes results for every slice
-- [ ] The strategy comparison produces a matrix with per-slice deltas
-- [ ] `hybrid_rerank` is demonstrably the best default, with numbers
-- [ ] A deliberate retrieval regression is caught by the PR gate
-- [ ] Cross-tenant leakage and ACL bypass both measure **0** on the `permission` slice
-- [ ] Injection success rate ≤ 1% on the `injection` slice
+- [x] Full eval run completes and writes results for every slice — `--load-corpus` then `run`, 14 items across all 8 slices ([E-003](../execution/test_evidence.md))
+- [ ] The strategy comparison produces a matrix with per-slice deltas — per-slice metrics exist; the strategy sweep does not
+- [ ] `hybrid_rerank` is demonstrably the best default, with numbers — **blocked on T-206.** A stub cannot beat RRF; the default is `hybrid_rrf` until real reranker weights land ([ADR-009](./architecture.md#adr-009--a-stub-degrades-to-a-no-op-never-to-a-wrong-signal))
+- [ ] A deliberate retrieval regression is caught by the PR gate — **blocked on R-031**, evals are not in CI
+- [x] Cross-tenant leakage and ACL bypass both measure **0** on the `permission` slice — `acme-viewer` retrieves only the restricted document, `acme-member` retrieves everything except it
+- [ ] Injection success rate ≤ 1% on the `injection` slice — not measurable without a real `ANTHROPIC_API_KEY`; retrieval on that slice is scored, generation is not
 - [ ] Q-1 and Q-2 are decided and recorded as ADRs in [architecture.md § 15](./architecture.md#15-architecture-decision-records)
+
+> **Status note (2026-07-25).** The harness itself is real: it ingests `evals/fixtures` through the worker pipeline and calls `retrieve()` per item as the item's `acting_user`. It replaced a version that scored `gold_chunk_ids` against themselves and reported 1.0 on metrics it never computed (R-018). Two slices now show honest failures — `versioned` at 0.50 because retrieval has no `as_of` filter (R-030), and `unanswerable` at 0.00 by construction. Dataset volume is also well short of the "minimum 40 items per slice" deliverable: 14 items total.
 
 **Stories:** KW-5, PA-4
 
@@ -190,6 +231,8 @@ Task IDs follow `T-<phase><seq>` (see [tasks/README.md](../tasks/README.md)). Si
 ---
 
 ## Phase 5 — Operations
+
+**Milestone B.** The `cost_ledger` itself already exists from Phase 3 — this phase adds enforcement, telemetry, freshness, and the degradation ladder.
 
 **Goal:** The system can be run, paid for, and diagnosed.
 
@@ -224,6 +267,8 @@ Task IDs follow `T-<phase><seq>` (see [tasks/README.md](../tasks/README.md)). Si
 ---
 
 ## Phase 6 — User Interfaces
+
+Split across both milestones. **Phase 6a (Milestone A):** the chat UI with citations, plus the minimal document admin needed to get a corpus in — upload, job status, version history. **Phase 6b (Milestone B):** the eval dashboard and the full admin surface.
 
 **Goal:** Three UIs in one Next.js app. This is what makes the system demonstrable.
 
@@ -269,6 +314,8 @@ Task IDs follow `T-<phase><seq>` (see [tasks/README.md](../tasks/README.md)). Si
 ---
 
 ## Phase 7 — Cloud & Hardening
+
+**Milestone B.** Milestone A ships on Docker Compose.
 
 **Goal:** Deployed, load-tested, and reviewed.
 
@@ -320,23 +367,26 @@ Explicitly not in v1. Listed so the boundary is a decision, not an oversight.
 
 ## Cross-Phase Requirement Coverage
 
-Every production-ready requirement from the project brief, mapped to where it is built.
+Every production-ready requirement from the project brief, mapped to where it is built and which milestone it lands in. **All six differentiators ship in Milestone A** — the split trades breadth, never the things that distinguish this system from a tutorial.
 
-| Requirement | Phase | Section |
-| --- | --- | --- |
-| Document ingestion and versioning | 1 | [architecture § 6](./architecture.md#6-document-versioning--freshness) |
-| Role-based access control | 2 | [architecture § 5](./architecture.md#5-access-control-model) |
-| Hybrid semantic + keyword retrieval | 2 | [architecture § 7](./architecture.md#7-retrieval-pipeline) |
-| Reranking | 2 | [architecture § 7.7](./architecture.md#77-stage-6--reranking) |
-| Source citations | 3 | [architecture § 8.3](./architecture.md#83-native-citations) |
-| Evaluation datasets | 4 | [architecture § 11](./architecture.md#11-evaluation-architecture) |
-| Prompt-injection protection | 3 | [architecture § 9](./architecture.md#9-prompt-injection-defense) |
-| Query and cost monitoring | 5 | [architecture § 12](./architecture.md#12-cost-quotas--observability) |
-| Tenant isolation | 0 | [architecture § 4](./architecture.md#4-multi-tenancy--isolation) |
-| Retry, timeout, fallback policies | 5 | [architecture § 13](./architecture.md#13-resilience-policies) |
-| **Differentiator:** permission-aware retrieval | 2 | [architecture § 5.4](./architecture.md#54-why-post-filtering-is-wrong) |
-| **Differentiator:** evaluation dashboard | 4 + 6 | [architecture § 11.3](./architecture.md#113-strategy-comparison) |
-| **Differentiator:** freshness detection | 1 + 5 | [architecture § 6.2](./architecture.md#62-freshness-signals) |
-| **Differentiator:** multilingual PT↔EN | 1 + 2 | [architecture § 7.5](./architecture.md#75-stage-4b--lexical-retrieval) |
-| **Differentiator:** strategy comparison | 4 | [architecture § 11.3](./architecture.md#113-strategy-comparison) |
-| **Differentiator:** unsupported-answer detection | 3 | [architecture § 10](./architecture.md#10-groundedness--unsupported-answer-detection) |
+| Requirement | Phase | Milestone | Section |
+| --- | --- | --- | --- |
+| Document ingestion and versioning | 1 | **A** | [architecture § 6](./architecture.md#6-document-versioning--freshness) |
+| Role-based access control | 2 | **A** | [architecture § 5](./architecture.md#5-access-control-model) |
+| Hybrid semantic + keyword retrieval | 2 | **A** | [architecture § 7](./architecture.md#7-retrieval-pipeline) |
+| Reranking | 2 | **A** | [architecture § 7.7](./architecture.md#77-stage-6--reranking) |
+| Source citations | 3 | **A** | [architecture § 8.3](./architecture.md#83-native-citations) |
+| Evaluation datasets | 4 | **A** | [architecture § 11](./architecture.md#11-evaluation-architecture) |
+| Prompt-injection protection | 3 | **A** | [architecture § 9](./architecture.md#9-prompt-injection-defense) |
+| Tenant isolation | 0 | **A** | [architecture § 4](./architecture.md#4-multi-tenancy--isolation) |
+| Query and cost monitoring | 3 (ledger) → 5 (budgets, UI) | **A** → B | [architecture § 12](./architecture.md#12-cost-quotas--observability) |
+| Retry, timeout, fallback policies | 5 | B | [architecture § 13](./architecture.md#13-resilience-policies) |
+| **Differentiator:** permission-aware retrieval | 2 | **A** | [architecture § 5.4](./architecture.md#54-why-post-filtering-is-wrong) |
+| **Differentiator:** evaluation dashboard | 4 (harness) → 6b (UI) | **A** → B | [architecture § 11.3](./architecture.md#113-strategy-comparison) |
+| **Differentiator:** freshness detection | 1 (versions, archival) → 5 (scoring, conflicts) | **A** → B | [architecture § 6.2](./architecture.md#62-freshness-signals) |
+| **Differentiator:** multilingual PT↔EN | 1 + 2 | **A** | [architecture § 7.5](./architecture.md#75-stage-4b--lexical-retrieval) |
+| **Differentiator:** strategy comparison | 4 | **A** | [architecture § 11.3](./architecture.md#113-strategy-comparison) |
+| **Differentiator:** unsupported-answer detection | 3 | **A** | [architecture § 10](./architecture.md#10-groundedness--unsupported-answer-detection) |
+| Removal: archival &amp; erasure | 1 | **A** | [architecture § 6.4](./architecture.md#64-removal-archival-not-deletion) |
+
+Three requirements are split across milestones rather than deferred wholesale. In each case the **load-bearing half ships in A** and only the presentation or enforcement layer defers: the cost ledger records from day one but budgets arrive later; the eval harness produces numbers before there is a dashboard to render them; versioning and archival exist before staleness scoring interprets them.

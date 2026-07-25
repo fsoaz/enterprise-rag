@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install Python deps
+        run: uv sync --all-packages --group dev
+
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      - name: Biome check
+        working-directory: apps/web
+        run: npx biome check .
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install Python deps
+        run: uv sync --all-packages --group dev
+
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm ci
+
+      - name: mypy
+        run: uv run mypy
+
+      - name: import-linter
+        run: uv run lint-imports
+
+      - name: TypeScript
+        working-directory: apps/web
+        run: npx tsc --noEmit
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python deps
+        run: uv sync --all-packages --group dev
+
+      - name: Pytest (unit)
+        run: uv run pytest -q -m "not integration"
+        env:
+          DEV_AUTH_BYPASS: "true"
+
+  integration-db:
+    name: Migrations + RLS
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: enterprise_rag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d enterprise_rag"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@localhost:5432/enterprise_rag
+      DATABASE_URL_SYNC: postgresql+psycopg://rag_app:rag_app@localhost:5432/enterprise_rag
+      DATABASE_URL_MIGRATE: postgresql+psycopg://rag_migrate:rag_migrate@localhost:5432/enterprise_rag
+      DATABASE_URL_MAINT: postgresql+asyncpg://rag_maint:rag_maint@localhost:5432/enterprise_rag
+      DEV_AUTH_BYPASS: "true"
+      OIDC_ISSUER: http://localhost:8080/realms/enterprise-rag
+      OIDC_AUDIENCE: enterprise-rag-api
+      OIDC_JWKS_URL: http://localhost:8080/realms/enterprise-rag/protocol/openid-connect/certs
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python deps
+        run: uv sync --all-packages --group dev
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Init roles and extensions
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d enterprise_rag \
+            -f infra/compose/postgres/init.sql
+
+      - name: Alembic upgrade head
+        run: uv run alembic -c packages/db/alembic.ini upgrade head
+
+      - name: Alembic downgrade -1
+        run: uv run alembic -c packages/db/alembic.ini downgrade -1
+
+      - name: Alembic upgrade head (again)
+        run: uv run alembic -c packages/db/alembic.ini upgrade head
+
+      - name: Seed demo tenants
+        run: uv run python -m db.seed
+
+      - name: Integration tests (RLS + auth)
+        run: uv run pytest -q -m integration

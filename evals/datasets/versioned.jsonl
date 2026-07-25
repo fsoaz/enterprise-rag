@@ -1,0 +1,2 @@
+{"id": "ver-001", "question": "What is the current remote work allowance?", "gold_chunk_ids": ["chunk-hr-v2"], "expected_answer_facts": ["3 days"], "should_abstain": false, "language": "en", "as_of": null}
+{"id": "ver-002", "question": "What was the remote work allowance in March 2024?", "gold_chunk_ids": ["chunk-hr-v1"], "expected_answer_facts": ["2 days"], "should_abstain": false, "language": "en", "as_of": "2024-03-15"}

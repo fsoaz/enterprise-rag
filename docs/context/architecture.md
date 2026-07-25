@@ -113,7 +113,7 @@ flowchart TB
 
 ### 3.2 Inference service contract
 
-Two endpoints, versioned, no auth beyond a shared network boundary + service token:
+Two endpoints, versioned, auth by shared network boundary + service token:
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -121,6 +121,10 @@ Two endpoints, versioned, no auth beyond a shared network boundary + service tok
 | `POST /v1/rerank` | `{query: string, documents: string[], top_k: int}` → `{results: [{index, score}], model: string}` |
 
 The contract is provider-agnostic on purpose: swapping BGE-M3 for Voyage or OpenAI is a change inside `inference`, not a change in `api`.
+
+**Service token, and what "enforced" means here.** Both routes carry a dependency that compares the `Authorization: Bearer` value against `INFERENCE_SERVICE_TOKEN` with `hmac.compare_digest`. When the variable is **unset** the service stays open and logs a warning at startup, so `uvicorn inference.main:app` works with no configuration; every packaged deployment (Compose, CI, Dockerfile) sets it. This is deliberately not fail-closed — the failure mode of an unreachable embedder is a broken ingest, not a leak, and the service holds no tenant data. What it does buy: an attacker with network reach into the cluster cannot use the embedder as free compute or probe which documents are being indexed by timing.
+
+*Sending* the token was implemented before *checking* it (R-012). The lesson generalised into the review checklist: a control is not done until a test exercises the request that must be refused.
 
 ## 4. Multi-Tenancy & Isolation
 
@@ -140,7 +144,17 @@ CREATE POLICY tenant_isolation ON <t>
   USING (tenant_id = current_setting('app.current_tenant')::uuid);
 ```
 
-The API sets `app.current_tenant` as a **transaction-local** setting (`SET LOCAL`) at the start of every request-scoped transaction, from the JWT claim. The application connects as a role **without** `BYPASSRLS`. Migrations and the Celery worker's system-level sweeps use a separate privileged role.
+The API sets `app.current_tenant` as a **transaction-local** setting (`SET LOCAL`) at the start of every request-scoped transaction, from the JWT claim.
+
+Three database identities, with the split drawn so that nothing processing tenant-controlled content ever runs unrestricted:
+
+| Role | Used by | Privilege |
+| --- | --- | --- |
+| `rag_migrate` | Alembic only, in the pre-deploy task | DDL; `BYPASSRLS` |
+| `rag_app` | `api` **and every ingestion task** | No `BYPASSRLS` — RLS applies in full |
+| `rag_maint` | Cross-tenant schedulers (freshness sweep, budget rollup) | May read tenant IDs to enumerate work; **must** `SET LOCAL app.current_tenant` before touching any tenant row |
+
+Ingestion is the case that matters. An ingestion job parses a document the tenant supplied, so it must never hold a connection that RLS does not constrain. The scheduler enumerates job IDs under `rag_maint`, then each job executes under `rag_app` with a transaction-local tenant context read **from the job row in the database — never from the task payload**. A payload is serialized data that passed through a queue; treating it as an authorization input would make queue access equivalent to cross-tenant access.
 
 **Why both layers:** the ORM filter is the fast path and gives good errors; RLS is the backstop that survives a forgotten filter, a raw SQL query, or a future contributor's mistake. [testing.md](../standards/testing.md) mandates a test that deliberately removes the ORM filter and asserts RLS still blocks the read.
 
@@ -172,6 +186,19 @@ Collection ──contains──▶ Document ──has──▶ DocumentVersion �
 
 Permissions attach to **collections** (the common case) and to **individual documents** (the exception). Chunks inherit from their document version's document.
 
+**Roles are coarse capability gates; ACL entries are fine-grained resource grants. Both apply.** A role answers "may this kind of user perform this kind of action at all"; the ACL answers "on this specific resource". Neither substitutes for the other — holding `steward` does not imply write on every collection.
+
+| Role | Capabilities beyond read |
+| --- | --- |
+| `admin` | Everything below, plus ACL entry create/list. Bypasses ACL evaluation **within its own tenant** (never across tenants — that is RLS's job, and RLS has no bypass). |
+| `steward` | Curator: upload documents, archive, unarchive, create collections — each still subject to an ACL `write` check on the target collection. |
+| `member` | Read only, scoped by ACL. |
+| `viewer` | Read only, scoped by ACL. |
+
+Enforced as FastAPI dependencies in `apps/api/src/api/deps/auth.py` — `CuratorUser` (`admin`|`steward`) and `AclAdminUser` (`admin`) — resolved from `role_assignments` in Postgres. **Roles are never read from a token claim,** even on the OIDC path: `require_role` and `resolve_acl` must agree about the same caller, and only one of those two can read a JWT (R-019).
+
+**Role and ACL are checked independently on writes.** `POST /documents` requires a curator role *and* ACL `write` on the target collection. Without the second check a steward scoped to one collection could inject documents into another — including one they cannot read back (R-013).
+
 ### 5.2 ACL entries
 
 A single polymorphic table, `acl_entries`:
@@ -191,12 +218,24 @@ A single polymorphic table, `acl_entries`:
 
 At query time the resolved permission set is compiled to a SQL predicate, **not** applied afterwards:
 
-1. Resolve the user's subject set: `{user_id} ∪ {group_ids} ∪ {role_names}`.
-2. Compute the allowed collection set and the document-level allow/deny overrides.
-3. Cache the compiled predicate in Redis, keyed by `t:<tenant>:acl:<user_id>:<acl_version>`, TTL 5 min. `acl_version` is a per-tenant counter bumped on any ACL write, so grants and revocations take effect immediately without a stampede.
-4. Inject it into the retrieval CTEs.
+1. Read the tenant's current `acl_version` from the **authoritative database**.
+2. Resolve the user's subject set: `{user_id} ∪ {group_ids} ∪ {role_names}`.
+3. Compute the allowed collection set and the document-level allow/deny overrides.
+4. Cache the compiled predicate in Redis, keyed by `t:<tenant>:acl:<user_id>:<acl_version>`, TTL 5 min.
+5. Inject it into the retrieval CTEs.
 
-For large tenants the predicate degrades from an `IN (...)` list to a join against a materialized `user_visible_documents` table refreshed on ACL change. The choice is by cardinality, decided at query build time.
+The predicate is always a direct query against `acl_entries`. There is no materialized visibility table — see [ADR-008](#adr-008--no-materialized-authorization-state).
+
+#### Revocation is immediate, and here is exactly why
+
+"Immediate revocation" is a claim that depends entirely on where the version number comes from, so the mechanism is specified rather than assumed:
+
+- The ACL mutation and the `acl_versions` increment **commit in the same transaction**. There is no window in which the entry has changed but the version has not.
+- Step 1 reads that version **from Postgres on every request** — never from the Redis cache, never from a JWT claim, never from session state. Only the *compiled predicate* is cached, and it is keyed by the version just read.
+- A bumped version therefore misses every existing cache entry on the very next request. Old entries are never invalidated explicitly; they simply become unreachable and expire.
+- A version carried in a stale or long-lived token is never trusted for anything.
+
+The cost is one cheap indexed read per request, which buys a revocation guarantee that does not depend on cache eviction timing. `queries.acl_version` records the version actually used, so an audit can reconstruct which permission state produced a given answer.
 
 ### 5.4 Why post-filtering is wrong
 
@@ -243,6 +282,41 @@ A nightly Celery beat job recomputes a `staleness_score` per document from these
 | Corruption detected | Affected documents |
 
 `chunk_embeddings` carries `model_name` and `model_version` so two embedding generations can coexist during a migration. Retrieval filters to the active generation.
+
+### 6.4 Removal: archival, not deletion
+
+A system that promises resolvable historical citations, an append-only version chain, and a 90-day audit trail **cannot also offer an ordinary cascade delete**. Deleting a document and its versions strands every prior answer that cited it: `query_citations` rows point at chunks that no longer exist, and the audit record becomes unreconstructable. Removal is therefore split into two operations with very different privileges.
+
+#### Archival — the default, and the only one Stewards can perform
+
+`POST /documents/{id}/archive` sets `archived_at`. It is metadata-only and reversible.
+
+| Effect | Detail |
+| --- | --- |
+| New retrieval | Excluded — archived documents are filtered out alongside superseded versions |
+| Existing citations | Fully resolvable. A cited span still renders, badged "archived". |
+| Versions, chunks, embeddings | Retained untouched |
+| Reversible | Yes — `POST /documents/{id}/unarchive` |
+
+This covers the overwhelmingly common case: the document is obsolete, nobody should get it as an answer any more, and the record of what it once said must survive.
+
+#### Erasure — privileged, audited, irreversible
+
+`POST /admin/documents/{id}/erase` exists for legal and privacy obligations (GDPR/LGPD erasure requests, material uploaded in error, contractual purge). It requires a distinct admin permission, not the `manage` grant that lets a Steward archive.
+
+| Purged | Retained |
+| --- | --- |
+| Original bytes in object storage | The `documents` and `document_versions` rows, as tombstones with `erased_at` set |
+| `chunks.body` text | `query_citations` rows, with `cited_text` nulled |
+| `chunk_embeddings` rows | The `erasure_log` entry: actor, reason, legal basis, timestamp, affected counts |
+
+The retention asymmetry is the point. **A historical answer degrades to "source erased" rather than dangling into a null reference** — the audit trail still shows that an answer was given, when, to whom, and that its source has since been erased under a recorded legal basis. That is what an auditor needs; a silently missing row is not.
+
+Erasure is refused with 409 while a `legal_hold` flag is set on the document, so a retention obligation cannot be defeated by a deletion request.
+
+#### `DELETE /documents/{id}` is not offered in v1
+
+The route exists only to return `405` with a problem body pointing at `/archive` and `/erase`. Making the wrong operation absent is more reliable than documenting that it should not be used.
 
 ## 7. Retrieval Pipeline
 
@@ -320,10 +394,12 @@ The harness in [§ 11](#11-evaluation-architecture) can run any of these against
 | --- | --- |
 | `dense_only` | 4a → 7 |
 | `lexical_only` | 4b → 7 |
-| `hybrid_rrf` | 4a + 4b → 5 → 7 |
-| `hybrid_rerank` | 4a + 4b → 5 → 6 → 7 *(default)* |
+| `hybrid_rrf` | 4a + 4b → 5 → 7 *(current default — see below)* |
+| `hybrid_rerank` | 4a + 4b → 5 → 6 → 7 *(target default)* |
 | `hybrid_rerank_expand` | 2 → 4a + 4b → 5 → 6 → 7 |
 | `hybrid_rerank_sparse` | adds BGE-M3 sparse vectors as a third arm (Q-2) |
+
+**The default is `hybrid_rrf` while the reranker is a stub.** `hybrid_rerank` remains the intended default and the Phase 2 exit criterion still requires it to beat `hybrid_rrf` with numbers — but a stub cannot beat anything, and the length-sorting stub that shipped first actively degraded the fused order it was handed (R-016). The default reverts to `hybrid_rerank` when real BGE-reranker-v2-m3 weights land (T-206) and the eval shows the improvement.
 
 ## 8. Generation & Citations
 
@@ -439,6 +515,14 @@ Top rerank score plus the score gap between rank 1 and rank 5. A low top score m
 
 Abstention is a *feature*, and the abstention rate is a tracked metric on the eval dashboard in both directions: too high means retrieval is failing; too low means the thresholds are not protecting anyone. Thresholds are per-tenant configurable — a healthcare tenant will want them stricter than a SaaS docs tenant.
 
+#### The verdict is computed before any answer text is sent
+
+All three signals need the finished answer and its citations, so the verdict cannot exist until generation completes. The SSE handler therefore **consumes the model stream without forwarding it**, computes the verdict, and only then emits the answer — chunked into `token` events, so the wire contract is unchanged.
+
+This costs the live-typing effect and is worth it. The first implementation streamed tokens as they arrived and, on `unsupported`, appended the abstention message as a further `token` event (R-017). Since the client concatenates, the user read the ungrounded answer in full and then a retraction underneath it — the gate fired and protected nobody. **An abstention that arrives after the text it was meant to suppress is not an abstention.**
+
+If live streaming is reinstated for latency reasons, it needs a protocol change the client honours — a `retract` event that clears the buffer — not merely a reordering.
+
 ## 11. Evaluation Architecture
 
 ### 11.1 Golden dataset
@@ -457,6 +541,17 @@ Committed to `evals/datasets/`, versioned with the code, no real customer data.
 | `injection` | Adversarial documents attempting instruction hijack |
 
 Each item: `question`, `expected_answer_facts[]`, `gold_chunk_ids[]`, `as_of`, `acting_user`, `should_abstain`.
+
+#### The corpus behind the gold labels
+
+`gold_chunk_ids` are **symbolic labels** (`chunk-security-en`), not database identifiers — the dataset is committed and the database is not. `evals/corpus.json` maps each label to a fixture file, a collection, and a version position; `evals/harness/corpus.py` materialises that manifest by running the fixtures through the **real worker pipeline** (parse → chunk → embed → FTS index) and returns `label → document_version_id`. Scoring compares the `document_version_id` of each retrieved hit against that mapping.
+
+Mapping by *version*, not document, is what lets the `versioned` slice work: `chunk-hr-v1` and `chunk-hr-v2` are two versions of one document, distinguishable only by version ID.
+
+Two rules the harness enforces:
+
+- **It runs the real pipeline.** `retrieve()` is called per item, as that item's `acting_user`, against a seeded tenant. There is no offline or mocked mode.
+- **It never fabricates.** Missing corpus, missing tenant, missing user, or unset `DATABASE_URL` each exit non-zero with a message. The original harness scored `gold_chunk_ids` against itself and reported 1.0 across the board (R-018); the failure mode to design against is a green number, not a red one.
 
 ### 11.2 Metrics
 
@@ -547,7 +642,7 @@ One breaker per dependency (`inference`, `anthropic`, `postgres`). Opens after 5
 
 ## 14. Data Model
 
-Twenty tables. Every tenant-scoped table has `tenant_id uuid NOT NULL`, RLS enabled, and `created_at` / `updated_at`.
+Twenty-one tables. Every tenant-scoped table has `tenant_id uuid NOT NULL`, RLS enabled, and `created_at` / `updated_at`.
 
 ### 14.1 Identity & tenancy
 
@@ -564,7 +659,7 @@ Twenty tables. Every tenant-scoped table has `tenant_id uuid NOT NULL`, RLS enab
 | Table | Key columns | Notes |
 | --- | --- | --- |
 | `collections` | `id`, `tenant_id`, `name`, `description`, `default_review_interval_days` | ACL attaches here in the common case |
-| `documents` | `id`, `tenant_id`, `collection_id`, `title`, `source_uri`, `language`, `owner_user_id`, `review_interval_days`, `last_reviewed_at`, `staleness_score` | Stable identity across versions |
+| `documents` | `id`, `tenant_id`, `collection_id`, `title`, `source_uri`, `language`, `owner_user_id`, `review_interval_days`, `last_reviewed_at`, `staleness_score`, `archived_at`, `erased_at`, `legal_hold` | Stable identity across versions. `archived_at` excludes from new retrieval; `erased_at` marks a tombstone (§ 6.4) |
 | `document_versions` | `id`, `tenant_id`, `document_id`, `version_no`, `content_sha256`, `storage_key`, `mime_type`, `page_count`, `supersedes_id`, `effective_from`, `effective_to`, `parse_status` | `effective_to IS NULL` ⇒ current |
 | `chunks` | `id`, `tenant_id`, `document_version_id`, `ordinal`, `body text`, `token_count`, `page_from`, `page_to`, `section_path`, `language`, `injection_risk`, `search_vector tsvector` | GIN index on `search_vector` |
 | `chunk_embeddings` | `chunk_id`, `tenant_id`, `model_name`, `model_version`, `embedding vector(1024)` | HNSW index; composite PK allows two model generations to coexist |
@@ -580,12 +675,13 @@ Twenty tables. Every tenant-scoped table has `tenant_id uuid NOT NULL`, RLS enab
 
 | Table | Key columns | Notes |
 | --- | --- | --- |
-| `queries` | `id`, `tenant_id`, `user_id`, `question`, `language`, `strategy`, `as_of`, `retrieved_chunk_ids uuid[]`, `rerank_scores real[]`, `answer_text`, `groundedness_verdict`, `citation_coverage`, `latency_ms`, `model`, `prompt_hash`, `acl_version` | The audit record |
+| `queries` | `id`, `tenant_id`, `user_id`, `question`, `language`, `strategy`, `as_of`, `retrieved_chunk_ids uuid[]`, `rerank_scores real[]`, `answer_text`, `groundedness_verdict`, `citation_coverage`, `latency_ms`, `model`, `prompt_hash`, `acl_version` | The audit record. `acl_version` is the effective permission version used for this retrieval (§ 5.3). |
 | `query_citations` | `id`, `query_id`, `chunk_id`, `document_version_id`, `cited_text`, `start_char`, `end_char`, `answer_sentence_idx` | Maps native citations back to sources |
 | `feedback` | `id`, `query_id`, `user_id`, `rating`, `reason_code`, `comment` | Feeds the eval corpus |
 | `ingestion_jobs` | `id`, `tenant_id`, `document_version_id`, `stage`, `status`, `attempts`, `error`, `started_at`, `finished_at` | Stages: `download`, `parse`, `ocr`, `chunk`, `embed`, `index` |
 | `cost_ledger` | `id`, `tenant_id`, `query_id`, `purpose`, `model`, `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `latency_ms`, `computed_cost_usd`, `price_table_version` | One row per LLM call |
 | `model_prices` | `version`, `model`, `input_usd_per_mtok`, `output_usd_per_mtok`, `cache_read_multiplier`, `cache_write_multiplier`, `effective_from` | Versioned pricing |
+| `erasure_log` | `id`, `tenant_id`, `document_id`, `actor_user_id`, `reason`, `legal_basis`, `versions_affected`, `citations_affected`, `created_at` | Append-only. Survives the erasure it records (§ 6.4). |
 
 ### 14.5 Evaluation
 
@@ -607,6 +703,7 @@ Twenty tables. Every tenant-scoped table has `tenant_id uuid NOT NULL`, RLS enab
 | B-tree on `cost_ledger(tenant_id, created_at)` | Budget rollups |
 | Unique on `document_versions(document_id, content_sha256)` | Idempotent ingest |
 | Partial unique on `document_versions(document_id) WHERE effective_to IS NULL` | Exactly one current version |
+| Partial on `documents(tenant_id, collection_id) WHERE archived_at IS NULL AND erased_at IS NULL` | Retrieval's document-eligibility filter (§ 6.4) |
 
 ## 15. Architecture Decision Records
 
@@ -666,6 +763,32 @@ Twenty tables. Every tenant-scoped table has `tenant_id uuid NOT NULL`, RLS enab
 
 **Cost accepted:** one network hop (~2–5 ms intra-VPC) and one more deployable.
 
+### ADR-008 — No materialized authorization state
+
+**Decision:** The ACL predicate is always compiled directly from `acl_entries`. No `user_visible_documents` table, no precomputed visibility, no materialized view — regardless of tenant size.
+
+**Why:** An earlier draft of this document specified degrading to a materialized visibility table above a cardinality threshold. That was a premature optimization with a security blast radius. It creates a **second authorization system**: derived state that can be stale, partially refreshed, or silently failed, where any of those conditions grants or denies access incorrectly. Worse, the failure is quiet — nothing in a wrong-but-populated visibility table looks like an error. A direct join against an indexed `acl_entries` is fast at every corpus size this system is scoped for, and it has exactly one source of truth.
+
+**If a benchmark later forces it**, the bar is: the visibility state updates **inside the same transaction** as the ACL write; any stale, partial, or failed refresh **fails closed** rather than serving the old set; and it ships with its own test matrix covering group removal, deny insertion, a document moved between collections, concurrent ACL edits, and an interrupted refresh. Absent all of that, it does not ship.
+
+**Cost accepted:** the ACL join runs on every retrieval instead of being amortized. That is the correct trade for an authorization path.
+
+### ADR-009 — A stub degrades to a no-op, never to a wrong signal
+
+**Decision:** Any placeholder standing in for a real model returns the *identity* of its stage, or a value that is structurally valid but carries no invented information. It never manufactures a ranking, a score, or a metric that downstream code will treat as meaningful.
+
+**Why:** Three separate placeholders in the Milestone A MVP failed this and each produced confident, plausible, wrong output (R-015, R-016, R-018):
+
+- The embedding stub returned all-zero vectors. pgvector's cosine distance is undefined against a zero vector, so every dense score was **NaN** — silently corrupting ordering, RRF fusion, and retrieval confidence. "Stubbed" implied inert; it was actively poisonous.
+- The rerank stub sorted by document length. As the default strategy's final stage, it reordered good fused results into a meaningless order — worse than not reranking at all.
+- The eval harness scored `gold_chunk_ids` against themselves, reporting `recall@10 = 1.0` for a pipeline it never called.
+
+The common failure is not that the stubs were inaccurate. It is that **nothing looked broken.** A no-op stub produces obviously unimpressive numbers that invite the question "is the real model wired up yet?"; a fabricating stub produces good numbers that end the question.
+
+**Concretely, in this repo:** embeddings are deterministic hashed **unit** vectors (never zero, so the maths is defined, and identical text scores 1.0 against itself); rerank is an identity pass-through with monotonically decreasing scores; the default strategy is `hybrid_rrf` so the identity stage is not on the critical path; and the eval harness exits non-zero rather than emitting a number it did not measure.
+
+**Cost accepted:** the dense arm contributes no semantic signal until real weights land, so current recall is carried almost entirely by the lexical arm. That is visible in the eval output, which is the point.
+
 ## 16. Repository Layout
 
 ```text
@@ -685,6 +808,9 @@ enterprise-rag/
 │   │   └── tests/
 │   ├── inference/              # BGE-M3 + BGE-reranker-v2-m3
 │   │   ├── src/inference/
+│   │   │   ├── deps.py         # service-token check (§ 3.2)
+│   │   │   ├── routers/        # embed, rerank
+│   │   │   └── main.py
 │   │   └── tests/
 │   └── web/                    # Next.js
 │       ├── app/(chat)/ (eval)/ (admin)/
@@ -697,9 +823,13 @@ enterprise-rag/
 │   ├── llm/                    # Anthropic client wrapper, prompts, cost
 │   └── observability/          # logging, tracing, metrics
 ├── evals/
+│   ├── corpus.json             # gold label → fixture / collection / version manifest
 │   ├── datasets/               # golden set, versioned
 │   ├── fixtures/               # synthetic bilingual corpus
-│   └── harness/                # runner, metrics, judges
+│   └── harness/
+│       ├── corpus.py           # ingests fixtures via the real worker pipeline
+│       ├── metrics.py          # recall / nDCG / MRR, dataset loader
+│       └── run.py              # live retrieval runner (§ 11.1)
 ├── infra/
 │   ├── compose/                # docker-compose.yml + service Dockerfiles
 │   └── terraform/              # AWS modules

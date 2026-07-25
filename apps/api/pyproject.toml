@@ -1,0 +1,27 @@
+[project]
+name = "enterprise-rag-api"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "enterprise-rag-domain",
+    "enterprise-rag-db",
+    "enterprise-rag-retrieval",
+    "enterprise-rag-llm",
+    "enterprise-rag-observability",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic-settings>=2.7.0",
+    "python-multipart>=0.0.20",
+    "httpx>=0.28.0",
+    "PyJWT[crypto]>=2.10.0",
+    "boto3>=1.35.0",
+    "celery>=5.4.0",
+    "redis>=5.2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/api"]

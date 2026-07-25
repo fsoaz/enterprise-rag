@@ -2,7 +2,7 @@
 
 **Enterprise RAG Document Intelligence System** — turn a static document repository into an interactive, cited knowledge layer with permission-aware retrieval, multilingual PT↔EN search, and measured answer quality.
 
-> **Status: planning.** The design is complete and documented. No code has been written yet. There is nothing to install.
+> **Status: Milestone A MVP implemented.** Compose + API + retrieval + chat UI. Inference stubs and extractive LLM fallback work without GPU/API keys; set `ANTHROPIC_API_KEY` and real BGE weights for production-quality answers.
 
 ---
 
@@ -69,7 +69,7 @@ Full diagram and component contracts: [architecture.md § 3](docs/context/archit
 | --- | --- |
 | [conventions.md](docs/standards/conventions.md) | Toolchain, module boundaries, code style, database and migration rules, logging, git, definition of done |
 | [api_rules.md](docs/standards/api_rules.md) | Versioning, auth, error format, streaming, rate limits, full v1 endpoint inventory |
-| [testing.md](docs/standards/testing.md) | Seven test tiers, coverage targets, the security suite, eval gates, CI pipeline |
+| [testing.md](docs/standards/testing.md) | Eight test tiers, coverage targets, the security suite, eval gates, CI pipeline |
 | [ai_agent_rules.md](docs/standards/ai_agent_rules.md) | Rules for AI agents in this repo, plus the LLM-integration constraints that are correctness-critical |
 
 ### Execution — where we are
@@ -84,7 +84,41 @@ Full diagram and component contracts: [architecture.md § 3](docs/context/archit
 
 ## Getting started
 
-Nothing to run yet. Implementation begins at [Phase 0](docs/context/roadmap.md#phase-0--foundation) — a running skeleton that proves tenant isolation and auth before any feature is built on top of them. Start with [current_task.md](docs/execution/current_task.md).
+```bash
+cp .env.example .env
+uv sync --all-packages --group dev
+cd apps/web && npm install && cd ../..
+docker compose -f infra/compose/docker-compose.yml up -d postgres redis minio
+make migrate && make seed
+uv run uvicorn inference.main:app --host 127.0.0.1 --port 8001 &
+uv run uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload &
+cd apps/web && npm run dev
+```
+
+### Dev auth
+
+`.env.example` ships `DEV_AUTH_BYPASS=false`. To use the header-based dev login,
+set `DEV_AUTH_BYPASS=true` in your local `.env`, then send `X-Dev-User: acme-member`.
+
+> **`DEV_AUTH_BYPASS=true` trusts that header with no verification — any caller can
+> become any user.** Use it only on a development machine. `make up` sets it for the
+> local Compose stack; nothing else should.
+
+Seeded roles drive authorization: `acme-admin` (admin — manages ACL entries),
+`acme-steward` (curator — uploads and archives documents), `acme-member` and
+`acme-viewer` (read-only, and they see different documents by ACL).
+
+### Evals
+
+The harness scores real retrieval against the fixture corpus — it needs Postgres,
+a seeded tenant, and the inference service running:
+
+```bash
+uv run python -m evals.harness.run --load-corpus   # ingest evals/fixtures, then score
+uv run python -m evals.harness.run                 # score against the loaded corpus
+```
+
+See [current_task.md](docs/execution/current_task.md).
 
 ## Licence
 

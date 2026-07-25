@@ -66,21 +66,24 @@ The person running the deployment for one or many tenants.
 
 ## 5. Scope
 
+Scope is delivered in two milestones — see [roadmap.md § Two release boundaries](./roadmap.md#two-release-boundaries). **Milestone A (Portfolio release)** is a complete, deployable system carrying all six differentiators; **Milestone B (Enterprise expansion)** adds breadth. The list below is the full v1 surface; the milestone column says when.
+
 ### 5.1 In scope (v1)
 
 **Ingestion & content**
 
-- Multi-tenant document ingestion: PDF, DOCX, HTML, Markdown, plain text, EML
-- Scanned/image PDFs via OCR
-- Document versioning with content hashing and supersession chains
-- Document freshness detection and review scheduling
+- Multi-tenant document ingestion — **A:** PDF, Markdown, plain text · **B:** DOCX, HTML, EML
+- Scanned/image PDFs via OCR — **B**
+- Document versioning with content hashing and supersession chains — **A**
+- Archival, and privileged erasure for legal/privacy requests — **A**
+- Document freshness detection and review scheduling — **B**
 
 **Retrieval**
 
 - Hybrid retrieval: dense semantic (pgvector) + lexical full-text (Postgres FTS), fused with Reciprocal Rank Fusion
 - Cross-encoder reranking
 - Permission-aware **pre-filtered** retrieval (ACL applied before ranking, not after)
-- Cross-lingual PT↔EN retrieval (a Portuguese question retrieves relevant English documents and vice versa)
+- Cross-lingual PT↔EN retrieval (a Portuguese question retrieves relevant English documents and vice versa) — **A**
 
 **Generation**
 
@@ -93,16 +96,17 @@ The person running the deployment for one or many tenants.
 
 - Role-based access control per collection and per document
 - Tenant isolation enforced at both the application layer and the database layer
-- Per-query cost tracking and per-tenant budgets
-- Retry, timeout, circuit-breaker, and model-fallback policies
+- Per-query cost tracking — **A** · per-tenant budgets and quotas — **B**
+- Retry, timeout, circuit-breaker, and model-fallback policies — **B**
 - Evaluation datasets, an offline evaluation harness, and a retrieval-strategy comparison
 - Feedback loop (thumbs up/down + reason) feeding the evaluation corpus
 
 **Interfaces**
 
-- Chat UI with citations
-- Evaluation dashboard
-- Admin UI
+- Chat UI with citations — **A**
+- Document admin (upload, jobs, versions) — **A**
+- Evaluation dashboard — **B**
+- Full admin UI (tenants, roles, quotas, cost) — **B**
 - Versioned REST API with OpenAPI
 
 ### 5.2 Out of scope (v1)
@@ -164,14 +168,33 @@ Measured on the golden evaluation set (bilingual, versioned, committed to the re
 
 ### 7.4 Performance & cost
 
-| Metric | Target | Notes |
+A latency target without a workload behind it can be met by shrinking the corpus, dropping concurrency, or measuring a warm cache. Two **benchmark profiles** are therefore normative, and every target below names one. A measurement that does not state its profile is not a result.
+
+| Parameter | `dev-cpu` | `cloud-gpu` |
 | --- | --- | --- |
-| Time to first token (p95) | ≤ 1.2 s | Streamed chat |
-| End-to-end answer (p95) | ≤ 4 s | Retrieval + rerank + generation |
-| Retrieval-only latency (p95) | ≤ 400 ms | Hybrid + rerank, excludes LLM |
-| Ingestion throughput | ≥ 100 pages/min/worker | Text PDFs; OCR measured separately |
-| Cost per query (median) | ≤ US$ 0.03 | With prompt caching active |
-| Prompt cache hit rate | ≥ 0.70 | On the stable system + policy prefix |
+| Environment | Docker Compose, one host | ECS Fargate, one region |
+| Inference hardware | CPU (4 vCPU) | GPU-backed `inference` task |
+| Corpus | 10k chunks, 1 tenant | 100k chunks, 2 tenants |
+| Concurrency | 1 user | 20 concurrent users |
+| `max_tokens` | 2048 | 2048 |
+| Retrieved context | 8 chunks, ~6k tokens | 8 chunks, ~6k tokens |
+| Cache state | Warm (prompt cache primed) | Warm |
+| Model | `claude-opus-5`, primary path | `claude-opus-5`, primary path |
+| Network | Loopback | Same-region, client in-region |
+
+Cold starts, fallback-model paths, and OCR ingestion are measured and recorded but **not** gated — they are reported alongside, never substituted for, the warm primary-path number.
+
+| Metric | `dev-cpu` | `cloud-gpu` | Notes |
+| --- | --- | --- | --- |
+| Time to first token (p95) | ≤ 2.5 s | ≤ 1.2 s | Streamed chat |
+| End-to-end answer (p95) | ≤ 6 s | ≤ 4 s | Retrieval + rerank + generation |
+| Retrieval-only latency (p95) | ≤ 900 ms | ≤ 400 ms | Hybrid + rerank, excludes the LLM |
+| — of which reranking | ≤ 450 ms | ≤ 80 ms | Cross-encoder over 50 candidates |
+| Ingestion throughput | ≥ 25 pages/min/worker | ≥ 100 pages/min/worker | Text PDFs; OCR measured separately |
+| Cost per query (median) | ≤ US$ 0.03 | ≤ US$ 0.03 | Hardware-independent |
+| Prompt cache hit rate | ≥ 0.70 | ≥ 0.70 | Hardware-independent |
+
+The `dev-cpu` numbers are looser for one specific reason: BGE-reranker-v2-m3 on CPU needs roughly 200–450 ms to score 50 candidates, which alone consumes the entire `cloud-gpu` retrieval budget before generation starts. Publishing the tight numbers as universal would mean every local measurement failed an SLO the environment was never capable of meeting — so the profile that developers actually run against is stated honestly rather than aspirationally.
 
 ## 8. User Stories
 
