@@ -11,6 +11,7 @@
           "health"
         ],
         "summary": "Health",
+        "description": "Liveness only \u2014 the process is up. Never touches dependencies.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -36,6 +37,7 @@
           "health"
         ],
         "summary": "Ready",
+        "description": "Readiness \u2014 reports 503 when a hard dependency is down.\n\nPreviously this returned ``ready`` unconditionally, which made it useless as a\nprobe: an API with an unreachable database still advertised itself as ready and\nwould be sent traffic it could not serve.",
         "operationId": "ready_ready_get",
         "responses": {
           "200": {
@@ -43,9 +45,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Ready Ready Get"
                 }
@@ -1346,6 +1346,92 @@
           }
         }
       }
+    },
+    "/api/v1/admin/documents/{document_id}/erase": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Erase Document",
+        "description": "Destroy document content irreversibly, keeping an audit record.\n\nChunks and embeddings are deleted outright, which cascades to the citations\nthat pointed at them \u2014 erased text must not survive in a stored answer. The\n``documents`` and ``document_versions`` rows are retained (with ``erased_at``\nset) so existing references resolve to a tombstone rather than a dangling id,\nand so the erasure itself stays auditable.",
+        "operationId": "erase_document_api_v1_admin_documents__document_id__erase_post",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Document Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-Dev-User",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-User"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EraseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EraseResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1511,7 +1597,7 @@
               "hybrid_rerank"
             ],
             "title": "Strategy",
-            "default": "hybrid_rerank"
+            "default": "hybrid_rrf"
           }
         },
         "type": "object",
@@ -1649,6 +1735,63 @@
           "created_at"
         ],
         "title": "DocumentOut"
+      },
+      "EraseRequest": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "legal_basis": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Legal Basis"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason",
+          "legal_basis"
+        ],
+        "title": "EraseRequest"
+      },
+      "EraseResponse": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Document Id"
+          },
+          "erased_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Erased At"
+          },
+          "versions_affected": {
+            "type": "integer",
+            "title": "Versions Affected"
+          },
+          "citations_affected": {
+            "type": "integer",
+            "title": "Citations Affected"
+          },
+          "objects_deleted": {
+            "type": "integer",
+            "title": "Objects Deleted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id",
+          "erased_at",
+          "versions_affected",
+          "citations_affected",
+          "objects_deleted"
+        ],
+        "title": "EraseResponse"
       },
       "FeedbackOut": {
         "properties": {
@@ -1833,7 +1976,7 @@
               "hybrid_rerank"
             ],
             "title": "Strategy",
-            "default": "hybrid_rerank"
+            "default": "hybrid_rrf"
           },
           "top_k": {
             "type": "integer",

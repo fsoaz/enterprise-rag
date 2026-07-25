@@ -2,7 +2,9 @@
 
 **Enterprise RAG Document Intelligence System** — turn a static document repository into an interactive, cited knowledge layer with permission-aware retrieval, multilingual PT↔EN search, and measured answer quality.
 
-> **Status: Milestone A MVP implemented.** Compose + API + retrieval + chat UI. Inference stubs and extractive LLM fallback work without GPU/API keys; set `ANTHROPIC_API_KEY` and real BGE weights for production-quality answers.
+> **Status: Milestone A MVP implemented, plus a security and correctness pass.** Compose + API + retrieval + chat UI. Inference stubs and extractive LLM fallback work without GPU/API keys; set `ANTHROPIC_API_KEY` and real BGE weights for production-quality answers.
+>
+> The review pass closed the defects listed in [review_notes.md](docs/execution/review_notes.md) — notably an abstention gate that was structurally stuck on under the default strategy, ingest failures that were never recorded, and a prompt-injection score that nothing read. See [work_log.md](docs/execution/work_log.md).
 
 ---
 
@@ -33,8 +35,9 @@ No orchestration framework, no managed vector database. Both are deliberate — 
 | | |
 | --- | --- |
 | **Permission-aware retrieval** | ACLs are compiled into the ranking query, not applied afterwards. Post-filtering silently collapses recall and leaks result counts. |
-| **Native citations** | Character-level spans returned by the API, not `[1]`/`[2]` markers the model could invent. |
-| **Unsupported-answer detection** | Citation coverage + an entailment judge + retrieval confidence. Below threshold, the system abstains. |
+| **Native citations** | Character-level spans returned by the API, not `[1]`/`[2]` markers the model could invent — and the UI links each answer sentence to the span that supports it. |
+| **Unsupported-answer detection** | Citation coverage + an entailment judge + retrieval confidence, the last normalized per strategy so one threshold is meaningful across all four. Below threshold, the system abstains. |
+| **Enforced injection defense** | `injection_risk` is scored at ingest **and filtered in SQL on both retrieval arms**; borderline chunks reach the model labelled `[UNTRUSTED]`. |
 | **Evaluation dashboard** | Eight-slice bilingual golden set, measured every night, gated in CI. |
 | **Retrieval-strategy comparison** | "Hybrid + rerank is better" is a number on a dashboard, not an assertion in a README. |
 | **Freshness detection** | Chunks belong to document *versions*, so supersession is metadata and old citations stay resolvable. |
@@ -95,14 +98,31 @@ uv run uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload &
 cd apps/web && npm run dev
 ```
 
-### Dev auth
+### Dev auth and network exposure
 
 `.env.example` ships `DEV_AUTH_BYPASS=false`. To use the header-based dev login,
 set `DEV_AUTH_BYPASS=true` in your local `.env`, then send `X-Dev-User: acme-member`.
 
 > **`DEV_AUTH_BYPASS=true` trusts that header with no verification — any caller can
-> become any user.** Use it only on a development machine. `make up` sets it for the
-> local Compose stack; nothing else should.
+> become any user, in any tenant.** Use it only on a development machine. `make up`
+> sets it for the local Compose stack; nothing else should.
+
+Because the Compose stack runs with that bypass on and with development credentials
+throughout (default Postgres/MinIO/Keycloak passwords, no Redis auth), **every
+published port binds to `127.0.0.1` by default**. Overriding that exposes full
+read/write access to every tenant, plus an unauthenticated Celery broker, to anything
+that can route to the host:
+
+```bash
+BIND_ADDR=0.0.0.0 make up   # only on an isolated network you control
+```
+
+### Rate limits and budget
+
+Per-user request caps and a rolling 24-hour spend ceiling are enforced by default —
+see `RATE_LIMIT_*` and `TENANT_DAILY_BUDGET_USD` in `.env.example`. Rate limiting
+fails **open** when Redis is unreachable (a cache outage should not be a full
+outage); the budget guard reads `cost_ledger` in Postgres, so it holds regardless.
 
 Seeded roles drive authorization: `acme-admin` (admin — manages ACL entries),
 `acme-steward` (curator — uploads and archives documents), `acme-member` and
