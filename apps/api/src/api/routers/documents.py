@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 from datetime import UTC, datetime
 from typing import Annotated
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps.auth import AuthUser, CuratorUser, CurrentUser
 from api.deps.db import get_db_session
+from api.deps.limits import UploadRateLimited
 from api.services import storage
 from api.services.ingest import enqueue_ingest
 from api.services.problems import problem
@@ -26,8 +28,11 @@ from domain.errors import (
     PermissionDeniedError,
     ValidationError,
 )
+from domain.text import looks_like_pdf, looks_like_text
 from domain.types import AclPermission, IngestionStage, JobStatus, ParseStatus
 from retrieval.acl import document_acl_predicate, resolve_acl
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -133,28 +138,51 @@ class UploadAccepted(BaseModel):
     dispatch: str
 
 
-def _guess_mime(filename: str, content_type: str | None) -> str:
-    """Resolve the MIME type, preferring the extension over a generic browser guess.
+def _detect_media_type(data: bytes, filename: str) -> str | None:
+    """Resolve the media type from file *content*; ``None`` when unsupported.
 
-    Browsers send ``application/octet-stream`` for .md on many platforms, so the
-    extension is consulted whenever the declared type is absent, generic, or not
-    something the ingest pipeline can parse.
+    The declared ``Content-Type`` is attacker-controlled and is deliberately not
+    trusted: the previous version accepted whatever the client claimed whenever it
+    was not ``application/octet-stream``, so labelling an arbitrary binary
+    ``text/plain`` walked straight past the allowlist. The extension only chooses
+    between Markdown and plain text — both parse identically, so getting it wrong
+    is cosmetic.
     """
-    lower = filename.lower()
-    if lower.endswith(".pdf"):
+    if looks_like_pdf(data):
         return "application/pdf"
-    if lower.endswith((".md", ".markdown")):
-        return "text/markdown"
-    if lower.endswith(".txt"):
+    if looks_like_text(data):
+        lower = filename.lower()
+        if lower.endswith((".md", ".markdown")):
+            return "text/markdown"
         return "text/plain"
-    if content_type and content_type != "application/octet-stream":
-        return content_type
-    return content_type or "application/octet-stream"
+    return None
+
+
+async def _require_collection_write(
+    session: AsyncSession, user: AuthUser, collection_id: UUID
+) -> None:
+    """Reject callers without WRITE on this specific collection.
+
+    Holding a curator role is not enough. Every mutation of a document has to pass
+    this, not just upload: archive and unarchive previously checked role + READ
+    only, so a steward granted read-only access to a collection could pull any
+    document in it out of retrieval for every user — a write-level effect reachable
+    with read-level permission.
+    """
+    write_acl = await resolve_acl(
+        session,
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        permission=AclPermission.WRITE,
+    )
+    if not write_acl.subjects.is_admin and collection_id not in write_acl.allowed_collection_ids:
+        raise PermissionDeniedError(f"No write permission on collection {collection_id}")
 
 
 @router.post("", status_code=202, response_model=UploadAccepted)
 async def upload_document(
     user: CuratorUser,
+    _limited: UploadRateLimited,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     file: Annotated[UploadFile, File()],
     collection_id: Annotated[UUID, Form()],
@@ -170,17 +198,7 @@ async def upload_document(
     if collection is None:
         raise NotFoundError(f"No collection {collection_id}")
 
-    # Holding a curator role is not enough — the caller must also hold write on
-    # this specific collection, otherwise a steward scoped to one collection could
-    # inject documents into another (including one they cannot read back).
-    write_acl = await resolve_acl(
-        session,
-        tenant_id=user.tenant_id,
-        user_id=user.user_id,
-        permission=AclPermission.WRITE,
-    )
-    if not write_acl.subjects.is_admin and collection_id not in write_acl.allowed_collection_ids:
-        raise PermissionDeniedError(f"No write permission on collection {collection_id}")
+    await _require_collection_write(session, user, collection_id)
 
     raw = await _read_capped(file, max_upload_bytes())
     if not raw:
@@ -188,9 +206,10 @@ async def upload_document(
 
     digest = hashlib.sha256(raw).hexdigest()
     filename = file.filename or "upload.bin"
-    mime = _guess_mime(filename, file.content_type)
-    if mime not in ALLOWED_MIME_TYPES:
-        raise UnsupportedMediaTypeError(mime)
+    detected = _detect_media_type(raw, filename)
+    if detected is None or detected not in ALLOWED_MIME_TYPES:
+        raise UnsupportedMediaTypeError(file.content_type or "unknown")
+    mime = detected
     doc_title = title or filename
 
     document_id = uuid4()
@@ -245,6 +264,9 @@ async def upload_document(
             lambda: storage.put_object(key=key, body=raw, content_type=mime)
         )
     except Exception as exc:
+        # Reachable now that the tenant GUC survives the commit above (db.session
+        # re-applies it on each transaction); previously this handler died inside
+        # RLS and replaced the storage error with an opaque 500.
         job.status = JobStatus.FAILED.value
         job.error = f"upload failed: {exc}"[:2000]
         job.finished_at = datetime.now(UTC)
@@ -252,7 +274,14 @@ async def upload_document(
         await session.commit()
         raise
 
-    dispatch = await enqueue_ingest(job.id)
+    # A failing pipeline must not turn an accepted upload into a 500: the bytes are
+    # stored and the rows are committed, so the correct answer is still 202 with a
+    # job the client can poll. The worker records the failure on the job row itself.
+    try:
+        dispatch = await enqueue_ingest(job.id)
+    except Exception:
+        logger.exception("ingest dispatch failed for job %s", job.id)
+        dispatch = "failed"
 
     return UploadAccepted(
         document_id=document_id,
@@ -280,14 +309,20 @@ async def list_documents(
     stmt = stmt.order_by(Document.created_at.desc()).limit(limit)
     docs = (await session.scalars(stmt)).all()
 
-    data: list[DocumentOut] = []
-    for doc in docs:
-        current = await session.scalar(
-            select(DocumentVersion.id).where(
-                DocumentVersion.document_id == doc.id,
+    # One query for every current version rather than one per document: at the
+    # 200-document ceiling this was 201 round trips.
+    current_by_doc: dict[UUID, UUID] = {}
+    if docs:
+        rows = await session.execute(
+            select(DocumentVersion.document_id, DocumentVersion.id).where(
+                DocumentVersion.document_id.in_([d.id for d in docs]),
                 DocumentVersion.effective_to.is_(None),
             )
         )
+        current_by_doc = {doc_id: version_id for doc_id, version_id in rows.all()}
+
+    data: list[DocumentOut] = []
+    for doc in docs:
         data.append(
             DocumentOut(
                 id=doc.id,
@@ -296,7 +331,7 @@ async def list_documents(
                 language=doc.language,
                 archived_at=doc.archived_at,
                 created_at=doc.created_at,
-                current_version_id=current,
+                current_version_id=current_by_doc.get(doc.id),
             )
         )
     return {"data": data, "next_cursor": None}
@@ -390,6 +425,7 @@ async def archive_document(
     doc = await session.scalar(await _readable_documents(session, user, stmt=stmt))
     if doc is None:
         raise NotFoundError(f"No document {document_id}")
+    await _require_collection_write(session, user, doc.collection_id)
     if doc.archived_at is None:
         doc.archived_at = datetime.now(UTC)
         await session.flush()
@@ -416,6 +452,7 @@ async def unarchive_document(
     doc = await session.scalar(await _readable_documents(session, user, stmt=stmt))
     if doc is None:
         raise NotFoundError(f"No document {document_id}")
+    await _require_collection_write(session, user, doc.collection_id)
     doc.archived_at = None
     await session.flush()
     return DocumentOut(

@@ -540,6 +540,15 @@ class Feedback(Base):
 
     __table_args__ = (
         CheckConstraint("rating BETWEEN -1 AND 1", name="ck_feedback__rating"),
+        # One vote per user per query, enforced in the database so concurrent
+        # submissions cannot slip past the application-level check.
+        Index(
+            "uq_feedback__query_user",
+            "query_id",
+            "user_id",
+            unique=True,
+            postgresql_where=text("user_id IS NOT NULL"),
+        ),
         Index("ix_feedback__tenant_id", "tenant_id"),
         Index("ix_feedback__query_id", "query_id"),
     )

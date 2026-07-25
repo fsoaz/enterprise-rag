@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import os
+
 from celery import Celery
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from observability.logging import configure_logging
 
 
 class WorkerSettings(BaseSettings):
@@ -12,6 +16,8 @@ class WorkerSettings(BaseSettings):
 
 
 settings = WorkerSettings()
+
+configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
 
 celery_app = Celery(
     "enterprise_rag_worker",

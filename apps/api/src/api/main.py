@@ -11,8 +11,24 @@ from api.problem import (
     get_request_id,
     problem_response,
 )
-from api.routers import acl, chat, collections, documents, feedback, health, me, search
+from api.routers import (
+    acl,
+    admin,
+    chat,
+    collections,
+    documents,
+    feedback,
+    health,
+    me,
+    search,
+)
+from api.settings import get_settings
 from domain.errors import DomainError
+from observability.logging import configure_logging
+
+# The observability package existed but nothing ever called it, so the API emitted
+# default uvicorn logging and none of the structured JSON it was built to produce.
+configure_logging(get_settings().log_level)
 
 app = FastAPI(
     title="Enterprise RAG API",
@@ -39,6 +55,7 @@ app.include_router(search.router, prefix="/api/v1")
 app.include_router(acl.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(feedback.router, prefix="/api/v1")
+app.include_router(admin.router, prefix="/api/v1")
 
 
 @app.exception_handler(DomainError)

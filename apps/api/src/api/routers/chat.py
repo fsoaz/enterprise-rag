@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
-from api.deps.auth import CurrentUser
 from api.deps.db import get_db_session
+from api.deps.limits import ChatRateLimited, assert_within_budget
 from api.services.chat import run_chat
 from api.settings import Settings, get_settings
 from domain.types import RetrievalStrategy
@@ -33,10 +33,14 @@ def _sse(event: str, data: dict[str, Any]) -> str:
 @router.post("/completions")
 async def chat_completions(
     body: ChatRequest,
-    user: CurrentUser,
+    user: ChatRateLimited,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> StreamingResponse:
+    # Checked before the stream opens so an over-budget tenant gets a 429 rather
+    # than a 200 whose body turns out to be an error event.
+    await assert_within_budget(session, tenant_id=user.tenant_id, settings=settings)
+
     async def event_stream() -> AsyncIterator[str]:
         async for evt in run_chat(
             session,

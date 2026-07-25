@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.deps.auth import CurrentUser
 from api.deps.db import get_db_session
+from api.deps.limits import SearchRateLimited
 from domain.types import DEFAULT_TOP_K_RERANK, RetrievalStrategy
 from retrieval.pipeline import retrieve
 
@@ -42,7 +42,7 @@ class SearchResponse(BaseModel):
 @router.post("", response_model=SearchResponse)
 async def search(
     body: SearchRequest,
-    user: CurrentUser,
+    user: SearchRateLimited,
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> SearchResponse:
     result = await retrieve(

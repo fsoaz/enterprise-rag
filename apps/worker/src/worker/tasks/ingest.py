@@ -7,13 +7,14 @@ never trusted from the Celery payload as an authorization source.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from datetime import UTC, datetime
 from uuid import UUID
 
 import boto3
 from botocore.client import BaseClient
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from db.models import Chunk, ChunkEmbedding, DocumentVersion, IngestionJob
@@ -24,6 +25,8 @@ from worker.pipeline.chunk import chunk_document
 from worker.pipeline.embed import embed_passages, embedding_model_meta
 from worker.pipeline.index import index_chunks_search_vectors
 from worker.pipeline.parse import parse_bytes
+
+logger = logging.getLogger(__name__)
 
 
 def _app_database_url() -> str:
@@ -65,6 +68,10 @@ def _s3_bucket() -> str:
     return os.environ.get("S3_BUCKET", "enterprise-rag")
 
 
+# Engines are built per call, not cached on the module. The Celery entrypoint runs
+# `asyncio.run` per task, so every task gets a fresh event loop; an engine cached
+# across them carries connections bound to a closed loop and fails with
+# "attached to a different loop". Pool reuse is not worth that.
 async def _resolve_tenant_id(job_id: UUID) -> UUID:
     engine = create_async_engine(_bypass_database_url(), pool_pre_ping=True)
     try:
@@ -102,6 +109,65 @@ async def _set_job_stage(
     await session.flush()
 
 
+async def _claim_job(
+    factory: async_sessionmaker[AsyncSession], *, tenant_id: UUID, job_id: UUID
+) -> UUID:
+    """Mark the job RUNNING and bump ``attempts`` in a committed transaction.
+
+    Separate from the work transaction on purpose: if the pipeline later fails and
+    its transaction rolls back, the attempt still counts. Incrementing inside the
+    work transaction meant ``attempts`` reset to 0 on every failure, so retry caps
+    could never trip.
+    """
+    async with factory() as session, session.begin():
+        await set_tenant_context(session, tenant_id)
+        job = await session.scalar(select(IngestionJob).where(IngestionJob.id == job_id))
+        if job is None:
+            msg = f"ingestion job not found under tenant: {job_id}"
+            raise LookupError(msg)
+        # DB row is authoritative — payload was only used as a pointer.
+        if job.tenant_id != tenant_id:
+            msg = "job tenant mismatch"
+            raise RuntimeError(msg)
+        job.attempts = int(job.attempts or 0) + 1
+        await _set_job_stage(session, job, stage=IngestionStage.DOWNLOAD)
+        return UUID(str(job.document_version_id))
+
+
+async def _record_failure(
+    factory: async_sessionmaker[AsyncSession],
+    *,
+    tenant_id: UUID,
+    job_id: UUID,
+    stage: IngestionStage,
+    error: str,
+) -> None:
+    """Persist a terminal failure in its own committed transaction.
+
+    The work runs inside ``session.begin()``, so anything written on the way out of
+    an exception is rolled back by that context manager. Recording the failure on
+    the same session therefore lost it entirely, leaving failed jobs sitting at
+    ``pending`` forever and indistinguishable from ones never picked up.
+    """
+    try:
+        async with factory() as session, session.begin():
+            await set_tenant_context(session, tenant_id)
+            job = await session.scalar(select(IngestionJob).where(IngestionJob.id == job_id))
+            if job is None:
+                return
+            await _set_job_stage(
+                session, job, stage=stage, status=JobStatus.FAILED, error=error[:2000]
+            )
+            version = await session.scalar(
+                select(DocumentVersion).where(DocumentVersion.id == job.document_version_id)
+            )
+            if version is not None:
+                version.parse_status = ParseStatus.FAILED.value
+    except Exception:
+        # Never let bookkeeping mask the original fault.
+        logger.exception("failed to record ingest failure for job %s", job_id)
+
+
 async def run_ingest_job(job_id: UUID) -> None:
     """Run the full ingest pipeline for a job. Safe to call from API (sync path)."""
     tenant_id = await _resolve_tenant_id(job_id)
@@ -110,124 +176,120 @@ async def run_ingest_job(job_id: UUID) -> None:
         engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
     )
     try:
+        await _run_ingest_job_with(factory, tenant_id=tenant_id, job_id=job_id)
+    finally:
+        await engine.dispose()
+
+
+async def _run_ingest_job_with(
+    factory: async_sessionmaker[AsyncSession], *, tenant_id: UUID, job_id: UUID
+) -> None:
+    version_id = await _claim_job(factory, tenant_id=tenant_id, job_id=job_id)
+
+    # Tracked outside the work transaction so the failure record names the stage
+    # that actually broke, rather than re-reading a rolled-back row.
+    current_stage = IngestionStage.DOWNLOAD
+    try:
         async with factory() as session, session.begin():
             await set_tenant_context(session, tenant_id)
             job = await session.scalar(select(IngestionJob).where(IngestionJob.id == job_id))
             if job is None:
                 msg = f"ingestion job not found under tenant: {job_id}"
                 raise LookupError(msg)
-            # DB row is authoritative — payload was only used as a pointer.
-            if job.tenant_id != tenant_id:
-                msg = "job tenant mismatch"
-                raise RuntimeError(msg)
-
-            job.attempts = int(job.attempts or 0) + 1
-            await _set_job_stage(session, job, stage=IngestionStage.DOWNLOAD)
 
             version = await session.scalar(
-                select(DocumentVersion).where(DocumentVersion.id == job.document_version_id)
+                select(DocumentVersion).where(DocumentVersion.id == version_id)
             )
             if version is None:
-                await _set_job_stage(
-                    session,
-                    job,
-                    stage=IngestionStage.DOWNLOAD,
-                    status=JobStatus.FAILED,
-                    error="document version not found",
-                )
-                return
+                msg = "document version not found"
+                raise LookupError(msg)
 
             version.parse_status = ParseStatus.RUNNING.value
             await session.flush()
 
-            try:
-                # --- download ---
-                client = _s3_client()
-                obj = client.get_object(Bucket=_s3_bucket(), Key=version.storage_key)
-                raw: bytes = obj["Body"].read()
+            # --- download ---
+            client = _s3_client()
+            obj = client.get_object(Bucket=_s3_bucket(), Key=version.storage_key)
+            raw: bytes = obj["Body"].read()
 
-                # --- parse ---
-                await _set_job_stage(session, job, stage=IngestionStage.PARSE)
-                parsed = parse_bytes(raw, mime_type=version.mime_type)
-                version.page_count = len(parsed.pages) or None
+            # --- parse ---
+            current_stage = IngestionStage.PARSE
+            await _set_job_stage(session, job, stage=current_stage)
+            parsed = parse_bytes(raw, mime_type=version.mime_type)
+            version.page_count = len(parsed.pages) or None
 
-                # --- chunk ---
-                await _set_job_stage(session, job, stage=IngestionStage.CHUNK)
-                text_chunks = chunk_document(parsed)
-                # Replace any prior chunks for this version (re-ingest).
-                existing = (
-                    await session.scalars(
-                        select(Chunk).where(Chunk.document_version_id == version.id)
-                    )
-                ).all()
-                for old in existing:
-                    await session.delete(old)
-                await session.flush()
+            # --- chunk ---
+            current_stage = IngestionStage.CHUNK
+            await _set_job_stage(session, job, stage=current_stage)
+            text_chunks = chunk_document(parsed)
+            # Replace any prior chunks for this version (re-ingest). One statement
+            # rather than a delete per row; embeddings cascade from the FK.
+            await session.execute(delete(Chunk).where(Chunk.document_version_id == version.id))
+            await session.flush()
 
-                chunk_rows: list[Chunk] = []
-                for tc in text_chunks:
-                    row = Chunk(
-                        tenant_id=tenant_id,
-                        document_version_id=version.id,
-                        ordinal=tc.ordinal,
-                        body=tc.body,
-                        token_count=tc.token_count,
-                        page_from=tc.page_from,
-                        page_to=tc.page_to,
-                        section_path=tc.section_path,
-                        language=tc.language,
-                        injection_risk=tc.injection_risk,
-                    )
-                    session.add(row)
-                    chunk_rows.append(row)
-                await session.flush()
-
-                # --- embed ---
-                await _set_job_stage(session, job, stage=IngestionStage.EMBED)
-                model_name, model_version = embedding_model_meta()
-                bodies = [c.body for c in chunk_rows]
-                # Batch embed to keep inference payloads bounded.
-                batch_size = 32
-                vectors: list[list[float]] = []
-                for i in range(0, len(bodies), batch_size):
-                    vectors.extend(await embed_passages(bodies[i : i + batch_size]))
-
-                for chunk_row, vector in zip(chunk_rows, vectors, strict=True):
-                    session.add(
-                        ChunkEmbedding(
-                            chunk_id=chunk_row.id,
-                            tenant_id=tenant_id,
-                            model_name=model_name,
-                            model_version=model_version,
-                            embedding=vector,
-                        )
-                    )
-                await session.flush()
-
-                # --- index (FTS) ---
-                await _set_job_stage(session, job, stage=IngestionStage.INDEX)
-                await index_chunks_search_vectors(
-                    session,
-                    chunk_ids=[c.id for c in chunk_rows],
+            chunk_rows: list[Chunk] = []
+            for tc in text_chunks:
+                row = Chunk(
                     tenant_id=tenant_id,
+                    document_version_id=version.id,
+                    ordinal=tc.ordinal,
+                    body=tc.body,
+                    token_count=tc.token_count,
+                    page_from=tc.page_from,
+                    page_to=tc.page_to,
+                    section_path=tc.section_path,
+                    language=tc.language,
+                    injection_risk=tc.injection_risk,
                 )
+                session.add(row)
+                chunk_rows.append(row)
+            await session.flush()
 
-                version.parse_status = ParseStatus.SUCCEEDED.value
-                await _set_job_stage(
-                    session, job, stage=IngestionStage.INDEX, status=JobStatus.SUCCEEDED
+            # --- embed ---
+            current_stage = IngestionStage.EMBED
+            await _set_job_stage(session, job, stage=current_stage)
+            model_name, model_version = embedding_model_meta()
+            bodies = [c.body for c in chunk_rows]
+            # Batch embed to keep inference payloads bounded.
+            batch_size = 32
+            vectors: list[list[float]] = []
+            for i in range(0, len(bodies), batch_size):
+                vectors.extend(await embed_passages(bodies[i : i + batch_size]))
+
+            for chunk_row, vector in zip(chunk_rows, vectors, strict=True):
+                session.add(
+                    ChunkEmbedding(
+                        chunk_id=chunk_row.id,
+                        tenant_id=tenant_id,
+                        model_name=model_name,
+                        model_version=model_version,
+                        embedding=vector,
+                    )
                 )
-            except Exception as exc:
-                version.parse_status = ParseStatus.FAILED.value
-                await _set_job_stage(
-                    session,
-                    job,
-                    stage=IngestionStage(job.stage),
-                    status=JobStatus.FAILED,
-                    error=str(exc)[:2000],
-                )
-                raise
-    finally:
-        await engine.dispose()
+            await session.flush()
+
+            # --- index (FTS) ---
+            current_stage = IngestionStage.INDEX
+            await _set_job_stage(session, job, stage=current_stage)
+            await index_chunks_search_vectors(
+                session,
+                chunk_ids=[c.id for c in chunk_rows],
+                tenant_id=tenant_id,
+            )
+
+            version.parse_status = ParseStatus.SUCCEEDED.value
+            await _set_job_stage(
+                session, job, stage=IngestionStage.INDEX, status=JobStatus.SUCCEEDED
+            )
+    except Exception as exc:
+        await _record_failure(
+            factory,
+            tenant_id=tenant_id,
+            job_id=job_id,
+            stage=current_stage,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
 
 
 @celery_app.task(  # type: ignore[untyped-decorator]

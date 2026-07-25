@@ -8,12 +8,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps.auth import CuratorUser, CurrentUser
 from api.deps.db import get_db_session
 from db.models import Collection
-from domain.errors import NotFoundError
+from domain.errors import ConflictError, NotFoundError
 
 router = APIRouter(prefix="/collections", tags=["collections"])
 
@@ -44,7 +45,14 @@ async def create_collection(
         default_review_interval_days=body.default_review_interval_days,
     )
     session.add(collection)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        # collections has UNIQUE(tenant_id, name). Unhandled, this surfaced as a
+        # generic 500 that gave the caller nothing to act on — and any client that
+        # creates-if-missing hits it on its second run.
+        await session.rollback()
+        raise ConflictError(f"A collection named {body.name!r} already exists") from exc
     return CollectionOut(
         id=collection.id,
         name=collection.name,

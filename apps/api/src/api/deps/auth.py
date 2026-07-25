@@ -132,7 +132,18 @@ async def _auth_user_from_db_row(session: AsyncSession, user: User) -> AuthUser:
 async def _lookup_by_external_subject(subject: str, settings: Settings) -> AuthUser:
     factory = _get_identity_factory(settings)
     async with factory() as session:
-        user = await session.scalar(select(User).where(User.external_subject == subject))
+        # Uniqueness on users is (tenant_id, external_subject), so the same subject
+        # may legitimately exist in two tenants. Picking whichever row came back
+        # first silently chose a tenant; refuse instead of guessing which identity
+        # — and therefore which tenant's data — the caller meant.
+        matches = (
+            await session.scalars(select(User).where(User.external_subject == subject).limit(2))
+        ).all()
+        if len(matches) > 1:
+            raise _unauthorized(
+                f"Subject {subject!r} exists in multiple tenants; dev bypass cannot disambiguate it"
+            )
+        user = matches[0] if matches else None
         if user is None or user.status != "active":
             raise _unauthorized("Unknown or inactive user")
         return await _auth_user_from_db_row(session, user)

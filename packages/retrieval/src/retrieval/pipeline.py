@@ -11,6 +11,7 @@ from domain.types import (
     DEFAULT_RRF_K,
     DEFAULT_TOP_K_RERANK,
     DEFAULT_TOP_K_RETRIEVAL,
+    INJECTION_RISK_FLAG,
     RetrievalStrategy,
 )
 from retrieval.acl import resolve_acl
@@ -27,6 +28,12 @@ class RetrievalHit:
     document_version_id: UUID
     body: str
     score: float
+    injection_risk: float = 0.0
+
+    @property
+    def is_suspect(self) -> bool:
+        """Chunk carries instruction-like content and should be labelled untrusted."""
+        return self.injection_risk >= INJECTION_RISK_FLAG
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +95,7 @@ async def retrieve(
                     document_version_id=dhit.document_version_id,
                     body=dhit.body,
                     score=dhit.score,
+                    injection_risk=dhit.injection_risk,
                 )
             )
 
@@ -107,6 +115,7 @@ async def retrieve(
                     document_version_id=lhit.document_version_id,
                     body=lhit.body,
                     score=lhit.score,
+                    injection_risk=lhit.injection_risk,
                 )
             )
 
@@ -131,6 +140,7 @@ async def retrieve(
                 document_version_id=by_id[cid].document_version_id,
                 body=by_id[cid].body,
                 score=score,
+                injection_risk=by_id[cid].injection_risk,
             )
             for cid, score in fused
             if cid in by_id
@@ -151,6 +161,7 @@ async def retrieve(
                     document_version_id=candidates[r.index].document_version_id,
                     body=candidates[r.index].body,
                     score=r.score,
+                    injection_risk=candidates[r.index].injection_risk,
                 )
                 for r in reranked
                 if 0 <= r.index < len(candidates)

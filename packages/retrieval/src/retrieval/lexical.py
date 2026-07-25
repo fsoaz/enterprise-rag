@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
 from db.models import Chunk, Document, DocumentVersion
-from domain.types import DEFAULT_TOP_K_RETRIEVAL
+from domain.types import DEFAULT_TOP_K_RETRIEVAL, INJECTION_RISK_BLOCK
 from retrieval.acl import AclResolution, document_acl_predicate
 
 
@@ -21,6 +21,7 @@ class LexicalHit:
     document_version_id: UUID
     body: str
     score: float
+    injection_risk: float = 0.0
 
 
 async def lexical_search(
@@ -60,6 +61,7 @@ async def lexical_search(
             Chunk.document_version_id,
             Chunk.body,
             rank.label("rank"),
+            Chunk.injection_risk,
         )
         .join(DocumentVersion, DocumentVersion.id == Chunk.document_version_id)
         .join(Document, Document.id == DocumentVersion.document_id)
@@ -69,6 +71,7 @@ async def lexical_search(
             Document.archived_at.is_(None),
             Document.erased_at.is_(None),
             Chunk.search_vector.is_not(None),
+            Chunk.injection_risk < INJECTION_RISK_BLOCK,
             match_pred,
             document_acl_predicate(acl),
         )
@@ -83,6 +86,7 @@ async def lexical_search(
             document_version_id=row[2],
             body=row[3],
             score=float(row[4] or 0.0),
+            injection_risk=float(row[5] or 0.0),
         )
         for row in rows
     ]

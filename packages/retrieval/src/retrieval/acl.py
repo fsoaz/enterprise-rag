@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Select, and_, false, or_, select, true
+from sqlalchemy import Select, and_, false, or_, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
@@ -187,16 +187,25 @@ def apply_document_acl(stmt: Select[Any], resolution: AclResolution) -> Select[A
 
 
 async def bump_acl_version(session: AsyncSession, *, tenant_id: UUID) -> int:
-    """Increment acl_versions in the same transaction as an ACL write."""
-    row = await session.scalar(select(AclVersion).where(AclVersion.tenant_id == tenant_id))
-    if row is None:
-        row = AclVersion(tenant_id=tenant_id, version=1)
-        session.add(row)
+    """Increment acl_versions in the same transaction as an ACL write.
+
+    Uses a single atomic UPDATE rather than read-modify-write: two concurrent ACL
+    changes both reading the same version produced one increment instead of two,
+    so a cache keyed on this value would keep serving results computed under the
+    superseded ACL.
+    """
+    new_version = await session.scalar(
+        update(AclVersion)
+        .where(AclVersion.tenant_id == tenant_id)
+        .values(version=AclVersion.version + 1)
+        .returning(AclVersion.version)
+    )
+    if new_version is None:
+        session.add(AclVersion(tenant_id=tenant_id, version=1))
         await session.flush()
         return 1
-    row.version = int(row.version) + 1
     await session.flush()
-    return int(row.version)
+    return int(new_version)
 
 
 async def create_acl_entry(

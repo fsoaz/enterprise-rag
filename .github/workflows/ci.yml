@@ -84,6 +84,14 @@ jobs:
         working-directory: apps/web
         run: npx tsc --noEmit
 
+      # tsc alone does not catch build-time failures (RSC boundary violations,
+      # static generation errors, font fetching), so the production build runs too.
+      - name: Next build
+        working-directory: apps/web
+        run: npx next build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
   unit:
     name: Unit tests
     runs-on: ubuntu-latest
@@ -120,11 +128,23 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # /ready reports per-dependency status, so the readiness integration test
+      # needs Redis reachable as well as Postgres.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     env:
       DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@localhost:5432/enterprise_rag
       DATABASE_URL_SYNC: postgresql+psycopg://rag_app:rag_app@localhost:5432/enterprise_rag
       DATABASE_URL_MIGRATE: postgresql+psycopg://rag_migrate:rag_migrate@localhost:5432/enterprise_rag
       DATABASE_URL_MAINT: postgresql+asyncpg://rag_maint:rag_maint@localhost:5432/enterprise_rag
+      REDIS_URL: redis://localhost:6379/0
       DEV_AUTH_BYPASS: "true"
       OIDC_ISSUER: http://localhost:8080/realms/enterprise-rag
       OIDC_AUDIENCE: enterprise-rag-api

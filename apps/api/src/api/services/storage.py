@@ -50,6 +50,11 @@ def get_object_bytes(*, key: str) -> bytes:
     return bytes(response["Body"].read())
 
 
+def delete_object(*, key: str) -> None:
+    """Remove an object. Succeeds when the key is already gone (S3 delete is idempotent)."""
+    _client().delete_object(Bucket=bucket_name(), Key=key)
+
+
 def ensure_bucket() -> None:
     client = _client()
     name = bucket_name()

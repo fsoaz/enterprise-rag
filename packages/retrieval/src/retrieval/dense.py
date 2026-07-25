@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Chunk, ChunkEmbedding, Document, DocumentVersion
-from domain.types import DEFAULT_TOP_K_RETRIEVAL
+from domain.types import DEFAULT_TOP_K_RETRIEVAL, INJECTION_RISK_BLOCK
 from retrieval.acl import AclResolution, document_acl_predicate
 
 
@@ -21,6 +21,7 @@ class DenseHit:
     document_version_id: UUID
     body: str
     score: float  # cosine similarity (1 - distance)
+    injection_risk: float = 0.0
 
 
 def _active_embedding_meta() -> tuple[str, str]:
@@ -49,6 +50,7 @@ async def dense_search(
             Chunk.document_version_id,
             Chunk.body,
             distance.label("distance"),
+            Chunk.injection_risk,
         )
         .join(ChunkEmbedding, ChunkEmbedding.chunk_id == Chunk.id)
         .join(DocumentVersion, DocumentVersion.id == Chunk.document_version_id)
@@ -61,6 +63,7 @@ async def dense_search(
             DocumentVersion.effective_to.is_(None),
             Document.archived_at.is_(None),
             Document.erased_at.is_(None),
+            Chunk.injection_risk < INJECTION_RISK_BLOCK,
             document_acl_predicate(acl),
         )
         .order_by(distance)
@@ -74,6 +77,7 @@ async def dense_search(
             document_version_id=row[2],
             body=row[3],
             score=1.0 - float(row[4]),
+            injection_risk=float(row[5] or 0.0),
         )
         for row in rows
     ]
@@ -85,18 +89,14 @@ async def embed_query(session: AsyncSession, query: str) -> list[float]:
     import httpx
 
     from domain.errors import InferenceUnavailable
+    from retrieval.rerank import inference_base_url, inference_headers
 
-    base = os.environ.get("INFERENCE_BASE_URL", "http://localhost:8001").rstrip("/")
-    headers: dict[str, str] = {}
-    token = os.environ.get("INFERENCE_SERVICE_TOKEN")
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"{base}/v1/embed",
+                f"{inference_base_url()}/v1/embed",
                 json={"texts": [query], "mode": "query"},
-                headers=headers,
+                headers=inference_headers(),
             )
             response.raise_for_status()
             vectors = response.json()["vectors"]

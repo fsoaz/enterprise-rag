@@ -3,16 +3,17 @@ from __future__ import annotations
 import hashlib
 import time
 from collections.abc import AsyncIterator, Iterator
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import CostLedger, Document, Query, QueryCitation
+from db.models import Collection, CostLedger, Document, DocumentVersion, Query, QueryCitation
 from domain.types import RetrievalStrategy
-from llm.client import AnthropicClient, RetrievedChunk, extractive_fallback
+from llm.client import AnthropicClient, JudgeResult, RetrievedChunk, extractive_fallback
 from llm.groundedness import (
     citation_coverage,
     groundedness_verdict,
@@ -22,6 +23,10 @@ from llm.groundedness import (
 from llm.models import PRIMARY_MODEL
 from retrieval.pipeline import retrieve
 
+# Matches the `version` column of `model_prices`; ModelRegistry is the in-process
+# source until that table is loaded and read.
+PRICE_TABLE_VERSION = "v0"
+
 
 async def _titles_for_docs(session: AsyncSession, doc_ids: list[UUID]) -> dict[UUID, str]:
     if not doc_ids:
@@ -30,6 +35,56 @@ async def _titles_for_docs(session: AsyncSession, doc_ids: list[UUID]) -> dict[U
         select(Document.id, Document.title).where(Document.id.in_(doc_ids))
     )
     return {row.id: row.title for row in rows.all()}
+
+
+async def _staleness_for_versions(
+    session: AsyncSession, version_ids: list[UUID]
+) -> dict[UUID, str]:
+    """Classify each cited version as fresh | stale | superseded.
+
+    Previously every citation was emitted with a hardcoded ``"fresh"``, which is a
+    positive claim about document currency that nothing checked — worse than
+    omitting the field, because a client can act on it.
+
+    - ``superseded``: a newer version of the document is current, so the cited text
+      no longer reflects the live document.
+    - ``stale``: the document is past its review interval (falling back to the
+      collection default, measured from creation when it has never been reviewed).
+    """
+    if not version_ids:
+        return {}
+    rows = await session.execute(
+        select(
+            DocumentVersion.id,
+            DocumentVersion.effective_to,
+            Document.last_reviewed_at,
+            Document.created_at,
+            func.coalesce(
+                Document.review_interval_days,
+                Collection.default_review_interval_days,
+            ),
+        )
+        .join(Document, Document.id == DocumentVersion.document_id)
+        .join(Collection, Collection.id == Document.collection_id)
+        .where(DocumentVersion.id.in_(version_ids))
+    )
+    now = datetime.now(UTC)
+    staleness: dict[UUID, str] = {}
+    for version_id, effective_to, last_reviewed, created_at, interval_days in rows.all():
+        if effective_to is not None:
+            staleness[version_id] = "superseded"
+            continue
+        reference = last_reviewed or created_at
+        overdue = (
+            reference is not None
+            and interval_days
+            and now - reference > timedelta(days=int(interval_days))
+        )
+        if overdue:
+            staleness[version_id] = "stale"
+            continue
+        staleness[version_id] = "fresh"
+    return staleness
 
 
 def _use_live_llm(api_key: str) -> bool:
@@ -67,6 +122,7 @@ async def run_chat(
         strategy=strategy,
     )
     titles = await _titles_for_docs(session, [h.document_id for h in result.hits])
+    staleness = await _staleness_for_versions(session, [h.document_version_id for h in result.hits])
     chunks = [
         RetrievedChunk(
             chunk_id=str(h.chunk_id),
@@ -74,11 +130,14 @@ async def run_chat(
             document_title=titles.get(h.document_id, "Document"),
             body=h.body,
             score=h.score,
+            is_suspect=h.is_suspect,
         )
         for h in result.hits
     ]
     scores = [h.score for h in result.hits]
-    confidence = retrieval_confidence(scores)
+    # Scores are on a strategy-specific scale; retrieval_confidence normalizes by
+    # strategy so a single floor is meaningful across all four.
+    confidence = retrieval_confidence(scores, strategy=result.strategy)
 
     yield {"event": "status", "data": {"stage": "generating"}}
 
@@ -167,6 +226,7 @@ async def run_chat(
     coverage = citation_coverage(generation.answer_text, generation.citations)
     # Skip live entailment judge when using extractive / stub key (cost + key)
     labels: list[str] = ["entailed"] * len(generation.citations) if generation.citations else []
+    judge: JudgeResult | None = None
     if (
         _use_live_llm(anthropic_api_key)
         and generation.citations
@@ -174,7 +234,8 @@ async def run_chat(
     ):
         client = AnthropicClient(anthropic_api_key)
         pairs = [(generation.answer_text, c.cited_text) for c in generation.citations[:8]]
-        labels = await client.judge_entailment(pairs)
+        judge = await client.judge_entailment(pairs)
+        labels = judge.labels
 
     verdict = groundedness_verdict(
         coverage=coverage,
@@ -205,7 +266,7 @@ async def run_chat(
                 "start_char": cite.start_char,
                 "end_char": cite.end_char,
                 "document_title": cite.document_title,
-                "staleness": "fresh",
+                "staleness": staleness.get(UUID(cite.document_version_id), "unknown"),
             },
         }
 
@@ -258,7 +319,25 @@ async def run_chat(
                 cache_creation_input_tokens=0,
                 latency_ms=latency_ms,
                 computed_cost_usd=generation.cost_usd,
-                price_table_version="v0",
+                price_table_version=PRICE_TABLE_VERSION,
+            )
+        )
+    # The entailment judge is a second billable model call per query; leaving it out
+    # of the ledger understated real spend on every answer.
+    if judge is not None and (judge.input_tokens or judge.output_tokens):
+        session.add(
+            CostLedger(
+                tenant_id=tenant_id,
+                query_id=query_id,
+                purpose="judge",
+                model=judge.model,
+                input_tokens=judge.input_tokens,
+                output_tokens=judge.output_tokens,
+                cache_read_input_tokens=judge.cache_read_input_tokens,
+                cache_creation_input_tokens=0,
+                latency_ms=None,
+                computed_cost_usd=judge.cost_usd,
+                price_table_version=PRICE_TABLE_VERSION,
             )
         )
     await session.flush()

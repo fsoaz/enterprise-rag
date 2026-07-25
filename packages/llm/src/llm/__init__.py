@@ -4,12 +4,14 @@ from llm.client import (
     AnthropicClient,
     CitationSpan,
     GenerationResult,
+    JudgeResult,
     RetrievedChunk,
     extractive_fallback,
 )
 from llm.groundedness import (
     citation_coverage,
     groundedness_verdict,
+    normalize_scores,
     retrieval_confidence,
     should_abstain,
 )
@@ -22,11 +24,13 @@ __all__ = [
     "AnthropicClient",
     "CitationSpan",
     "GenerationResult",
+    "JudgeResult",
     "ModelRegistry",
     "RetrievedChunk",
     "citation_coverage",
     "extractive_fallback",
     "groundedness_verdict",
+    "normalize_scores",
     "retrieval_confidence",
     "should_abstain",
 ]

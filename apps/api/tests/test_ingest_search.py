@@ -104,6 +104,38 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     clear_settings_cache()
 
 
+async def _purge_documents(document_ids: list[str]) -> None:
+    if not document_ids:
+        return
+    url = os.environ.get("DATABASE_URL_MIGRATE", _MIGRATE)
+    engine = create_async_engine(url)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT set_config('app.current_tenant', '', false)"))
+            await conn.execute(
+                text("DELETE FROM documents WHERE id = ANY(CAST(:ids AS uuid[]))"),
+                {"ids": document_ids},
+            )
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+def tracked_documents() -> Iterator[list[str]]:
+    """Document ids to delete at teardown.
+
+    These tests upload into the same tenant the eval harness scores. Leaving the
+    uploads behind accumulated duplicate documents across runs, which then sat in
+    the corpus the retrieval metrics are computed against — so the reported
+    recall@10 was measured partly against test residue.
+    """
+    import asyncio
+
+    created: list[str] = []
+    yield created
+    asyncio.run(_purge_documents(created))
+
+
 def _headers(user: str) -> dict[str, str]:
     return {"X-Dev-User": user}
 
@@ -122,7 +154,7 @@ def _policies_collection_id(client: TestClient, user: str) -> str:
     return str(match["id"])
 
 
-def test_upload_sync_ingest_and_search(client: TestClient) -> None:
+def test_upload_sync_ingest_and_search(client: TestClient, tracked_documents: list[str]) -> None:
     collection_id = _policies_collection_id(client, "acme-member")
 
     # Unique per run: the dev database accumulates documents across runs, so a
@@ -151,6 +183,7 @@ def test_upload_sync_ingest_and_search(client: TestClient) -> None:
     body = up.json()
     assert body["dispatch"] in {"sync", "celery"}
     document_id = body["document_id"]
+    tracked_documents.append(document_id)
 
     jobs = client.get(f"/api/v1/documents/{document_id}/jobs", headers=_headers("acme-member"))
     assert jobs.status_code == 200
@@ -172,7 +205,9 @@ def test_upload_sync_ingest_and_search(client: TestClient) -> None:
     assert "archive" in deleted.json()["detail"].lower()
 
 
-def test_acl_different_users_see_different_results(client: TestClient) -> None:
+def test_acl_different_users_see_different_results(
+    client: TestClient, tracked_documents: list[str]
+) -> None:
     collection_id = _policies_collection_id(client, "acme-admin")
 
     marker = f"ACLSPLIT{uuid4().hex[:12].upper()} engineering only secret handbook"
@@ -183,6 +218,8 @@ def test_acl_different_users_see_different_results(client: TestClient) -> None:
         data={"collection_id": collection_id, "title": "Eng Handbook"},
     )
     assert up.status_code == 202, up.text
+
+    tracked_documents.append(up.json()["document_id"])
 
     jobs = client.get(
         f"/api/v1/documents/{up.json()['document_id']}/jobs",

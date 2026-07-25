@@ -37,6 +37,16 @@ class Settings(BaseSettings):
     llm_judge_model: str = "claude-haiku-4-5"
     llm_fallback_model: str = "claude-sonnet-5"
 
+    redis_url: str = "redis://localhost:16379/0"
+
+    # Per-user request caps. Chat is tightest because each call is a billable
+    # generation plus an embedding; 0 disables a limit.
+    rate_limit_per_minute: int = 60
+    chat_rate_limit_per_minute: int = 10
+    upload_rate_limit_per_minute: int = 20
+    # Rolling 24h ceiling on a tenant's recorded spend; 0 disables the guard.
+    tenant_daily_budget_usd: float = 25.0
+
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     log_level: str = "INFO"

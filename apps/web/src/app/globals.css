@@ -17,5 +17,22 @@
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Uses the Source Sans variable set by the font loader in layout.tsx. The
+     previous hardcoded Arial stack overrode it, so the webfont was downloaded on
+     every page load and then never rendered. */
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Visually hidden but available to screen readers — used for live-region
+   announcements of streaming status. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }

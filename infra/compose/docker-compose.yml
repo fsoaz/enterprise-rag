@@ -1,10 +1,15 @@
+# Every published port binds to ${BIND_ADDR}, which defaults to loopback.
+# These services run with development credentials (default Postgres/MinIO/Keycloak
+# passwords, no Redis auth) and the API runs with DEV_AUTH_BYPASS=true, so exposing
+# them on 0.0.0.0 hands any host on the network full read/write access to every
+# tenant. Override BIND_ADDR only for an isolated network you control.
 name: enterprise-rag
 
 services:
   postgres:
     image: pgvector/pgvector:pg16
     ports:
-      - "${POSTGRES_PUBLISH_PORT:-5432}:5432"
+      - "${BIND_ADDR:-127.0.0.1}:${POSTGRES_PUBLISH_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -21,7 +26,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "${REDIS_PUBLISH_PORT:-6379}:6379"
+      - "${BIND_ADDR:-127.0.0.1}:${REDIS_PUBLISH_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -32,8 +37,8 @@ services:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     ports:
-      - "${MINIO_API_PUBLISH_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PUBLISH_PORT:-9001}:9001"
+      - "${BIND_ADDR:-127.0.0.1}:${MINIO_API_PUBLISH_PORT:-9000}:9000"
+      - "${BIND_ADDR:-127.0.0.1}:${MINIO_CONSOLE_PUBLISH_PORT:-9001}:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -57,7 +62,7 @@ services:
     image: quay.io/keycloak/keycloak:26.0
     command: start-dev
     ports:
-      - "8080:8080"
+      - "${BIND_ADDR:-127.0.0.1}:8080:8080"
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
@@ -74,7 +79,7 @@ services:
       context: ../..
       dockerfile: infra/compose/Dockerfile.api
     ports:
-      - "8000:8000"
+      - "${BIND_ADDR:-127.0.0.1}:8000:8000"
     env_file:
       - ../../.env.example
     environment:
@@ -128,7 +133,7 @@ services:
       context: ../..
       dockerfile: infra/compose/Dockerfile.inference
     ports:
-      - "8001:8001"
+      - "${BIND_ADDR:-127.0.0.1}:8001:8001"
     environment:
       LOG_LEVEL: INFO
       INFERENCE_SERVICE_TOKEN: dev-inference-token
@@ -140,10 +145,13 @@ services:
     build:
       context: ../..
       dockerfile: infra/compose/Dockerfile.web
+      # NEXT_PUBLIC_* is inlined into the client bundle at build time, so it has to
+      # arrive as a build arg. Passing it under `environment:` sets it only in the
+      # running container, where the already-compiled bundle never reads it.
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
     ports:
-      - "3000:3000"
-    environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      - "${BIND_ADDR:-127.0.0.1}:3000:3000"
     depends_on:
       - api
 

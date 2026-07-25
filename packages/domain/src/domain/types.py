@@ -80,6 +80,14 @@ class RetrievalStrategy(StrEnum):
 
 EMBEDDING_DIM = 1024
 DEFAULT_RRF_K = 60
+
+# Chunks scoring at or above this are excluded from retrieval outright: the score
+# only reaches this band on explicit instruction-override patterns ("ignore previous
+# instructions", "reveal your instructions", chat-template markers), which are not
+# things a genuine policy document says. Below it, a chunk is still retrievable but
+# is marked untrusted for the generation prompt.
+INJECTION_RISK_BLOCK = 0.8
+INJECTION_RISK_FLAG = 0.5
 DEFAULT_CHUNK_TOKENS = 512
 DEFAULT_CHUNK_OVERLAP = 64
 DEFAULT_TOP_K_RETRIEVAL = 50
