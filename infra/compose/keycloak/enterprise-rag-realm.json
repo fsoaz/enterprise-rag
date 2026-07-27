@@ -1,0 +1,308 @@
+{
+  "realm": "enterprise-rag",
+  "enabled": true,
+  "displayName": "Enterprise RAG",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "clients": [
+    {
+      "clientId": "enterprise-rag-web",
+      "name": "Enterprise RAG Web",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "redirectUris": [
+        "http://localhost:3000/api/auth/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "enterprise-rag-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "tenant-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "application-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "application_roles",
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "application-groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "application_groups",
+            "claim.name": "groups",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "id": "acme-admin",
+      "username": "acme-admin",
+      "email": "admin@acme.example",
+      "firstName": "Acme",
+      "lastName": "Admin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "acme-admin",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": [
+          "74f4e6f9-5bac-5500-9c9e-e7566252ece3"
+        ],
+        "application_roles": [
+          "admin"
+        ],
+        "application_groups": [
+          "engineering",
+          "legal"
+        ]
+      }
+    },
+    {
+      "id": "acme-steward",
+      "username": "acme-steward",
+      "email": "steward@acme.example",
+      "firstName": "Acme",
+      "lastName": "Steward",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "acme-steward",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": [
+          "74f4e6f9-5bac-5500-9c9e-e7566252ece3"
+        ],
+        "application_roles": [
+          "steward"
+        ],
+        "application_groups": [
+          "engineering"
+        ]
+      }
+    },
+    {
+      "id": "acme-member",
+      "username": "acme-member",
+      "email": "member@acme.example",
+      "firstName": "Acme",
+      "lastName": "Member",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "acme-member",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": [
+          "74f4e6f9-5bac-5500-9c9e-e7566252ece3"
+        ],
+        "application_roles": [
+          "member"
+        ],
+        "application_groups": [
+          "engineering"
+        ]
+      }
+    },
+    {
+      "id": "acme-viewer",
+      "username": "acme-viewer",
+      "email": "viewer@acme.example",
+      "firstName": "Acme",
+      "lastName": "Viewer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "acme-viewer",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": [
+          "74f4e6f9-5bac-5500-9c9e-e7566252ece3"
+        ],
+        "application_roles": [
+          "viewer"
+        ],
+        "application_groups": [
+          "legal"
+        ]
+      }
+    },
+    {
+      "id": "globex-admin",
+      "username": "globex-admin",
+      "email": "admin@globex.example",
+      "firstName": "Globex",
+      "lastName": "Admin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "globex-admin",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": [
+          "315ca06e-7157-5673-803b-4550a0aaf872"
+        ],
+        "application_roles": [
+          "admin"
+        ],
+        "application_groups": [
+          "ops",
+          "finance"
+        ]
+      }
+    },
+    {
+      "id": "globex-steward",
+      "username": "globex-steward",
+      "email": "steward@globex.example",
+      "firstName": "Globex",
+      "lastName": "Steward",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "globex-steward",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": [
+          "315ca06e-7157-5673-803b-4550a0aaf872"
+        ],
+        "application_roles": [
+          "steward"
+        ],
+        "application_groups": [
+          "ops"
+        ]
+      }
+    },
+    {
+      "id": "globex-member",
+      "username": "globex-member",
+      "email": "member@globex.example",
+      "firstName": "Globex",
+      "lastName": "Member",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "globex-member",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": [
+          "315ca06e-7157-5673-803b-4550a0aaf872"
+        ],
+        "application_roles": [
+          "member"
+        ],
+        "application_groups": [
+          "ops"
+        ]
+      }
+    },
+    {
+      "id": "globex-viewer",
+      "username": "globex-viewer",
+      "email": "viewer@globex.example",
+      "firstName": "Globex",
+      "lastName": "Viewer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "globex-viewer",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": [
+          "315ca06e-7157-5673-803b-4550a0aaf872"
+        ],
+        "application_roles": [
+          "viewer"
+        ],
+        "application_groups": [
+          "finance"
+        ]
+      }
+    }
+  ]
+}

@@ -84,6 +84,18 @@ jobs:
         working-directory: apps/web
         run: npx tsc --noEmit
 
+      # The committed OpenAPI document is a contract clients are written against.
+      # Three endpoints were added in one round and it went stale unnoticed, so the
+      # check regenerates from the code and fails on any difference.
+      - name: OpenAPI in sync
+        run: make openapi-check
+
+      - name: Generated frontend API types in sync
+        working-directory: apps/web
+        run: |
+          npm run generate:api-types
+          git diff --exit-code -- src/lib/generated/api.ts
+
       # tsc alone does not catch build-time failures (RSC boundary violations,
       # static generation errors, font fetching), so the production build runs too.
       - name: Next build
@@ -111,6 +123,27 @@ jobs:
         env:
           DEV_AUTH_BYPASS: "true"
 
+  web-test:
+    name: Frontend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Vitest with coverage
+        working-directory: apps/web
+        run: npm run test:coverage
+
   integration-db:
     name: Migrations + RLS
     runs-on: ubuntu-latest
@@ -120,11 +153,11 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: enterprise_rag
+          POSTGRES_DB: enterprise_rag_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d enterprise_rag"
+          --health-cmd "pg_isready -U postgres -d enterprise_rag_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -140,11 +173,16 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@localhost:5432/enterprise_rag
-      DATABASE_URL_SYNC: postgresql+psycopg://rag_app:rag_app@localhost:5432/enterprise_rag
-      DATABASE_URL_MIGRATE: postgresql+psycopg://rag_migrate:rag_migrate@localhost:5432/enterprise_rag
-      DATABASE_URL_MAINT: postgresql+asyncpg://rag_maint:rag_maint@localhost:5432/enterprise_rag
+      TEST_DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@localhost:5432/enterprise_rag_test
+      TEST_DATABASE_URL_MIGRATE: postgresql+psycopg://rag_migrate:rag_migrate@localhost:5432/enterprise_rag_test
+      DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@localhost:5432/enterprise_rag_test
+      DATABASE_URL_SYNC: postgresql+psycopg://rag_app:rag_app@localhost:5432/enterprise_rag_test
+      DATABASE_URL_MIGRATE: postgresql+psycopg://rag_migrate:rag_migrate@localhost:5432/enterprise_rag_test
+      DATABASE_URL_MAINT: postgresql+asyncpg://rag_maint:rag_maint@localhost:5432/enterprise_rag_test
       REDIS_URL: redis://localhost:6379/0
+      INFERENCE_BASE_URL: http://localhost:8001
+      INFERENCE_SERVICE_TOKEN: ci-inference-token
+      INFERENCE_BACKEND: stub
       DEV_AUTH_BYPASS: "true"
       OIDC_ISSUER: http://localhost:8080/realms/enterprise-rag
       OIDC_AUDIENCE: enterprise-rag-api
@@ -167,7 +205,7 @@ jobs:
         env:
           PGPASSWORD: postgres
         run: |
-          psql -h localhost -U postgres -d enterprise_rag \
+          psql -h localhost -U postgres -d enterprise_rag_test \
             -f infra/compose/postgres/init.sql
 
       - name: Alembic upgrade head
@@ -182,5 +220,27 @@ jobs:
       - name: Seed demo tenants
         run: uv run python -m db.seed
 
+      - name: Start inference service
+        run: |
+          uv run uvicorn inference.main:app \
+            --host 127.0.0.1 --port 8001 > "$RUNNER_TEMP/inference.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/inference.pid"
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8001/ready >/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/inference.pid")" 2>/dev/null; then
+              cat "$RUNNER_TEMP/inference.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/inference.log"
+          exit 1
+
       - name: Integration tests (RLS + auth)
         run: uv run pytest -q -m integration
+
+      - name: Inference logs on failure
+        if: failure()
+        run: cat "$RUNNER_TEMP/inference.log" || true

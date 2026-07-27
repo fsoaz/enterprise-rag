@@ -11,15 +11,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+from tests.integration_database import integration_database_urls
 
 from api.deps.auth import reset_auth_caches
 from api.settings import clear_settings_cache
 from db.session import reset_engine
 
 pytestmark = pytest.mark.integration
-
-_APP = "postgresql+asyncpg://rag_app:rag_app@localhost:15432/enterprise_rag"
-_MIGRATE = "postgresql+asyncpg://rag_migrate:rag_migrate@localhost:15432/enterprise_rag"
 
 
 async def _db_reachable(url: str) -> bool:
@@ -72,11 +70,9 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
 
     monkeypatch.setenv("DEV_AUTH_BYPASS", "true")
     monkeypatch.setenv("INGEST_SYNC", "true")
-    monkeypatch.setenv("DATABASE_URL", os.environ.get("DATABASE_URL", _APP))
-    monkeypatch.setenv(
-        "DATABASE_URL_MIGRATE",
-        os.environ.get("DATABASE_URL_MIGRATE", _MIGRATE),
-    )
+    app_url, migrate_url = integration_database_urls()
+    monkeypatch.setenv("DATABASE_URL", app_url)
+    monkeypatch.setenv("DATABASE_URL_MIGRATE", migrate_url)
     monkeypatch.setenv(
         "S3_ENDPOINT_URL", os.environ.get("S3_ENDPOINT_URL", "http://localhost:19000")
     )
@@ -87,7 +83,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     clear_settings_cache()
     reset_engine()
 
-    if not asyncio.run(_db_reachable(os.environ["DATABASE_URL"])):
+    if not asyncio.run(_db_reachable(app_url)):
         pytest.skip("database unreachable")
     if not _minio_reachable():
         pytest.skip("MinIO unreachable")
@@ -107,7 +103,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
 async def _purge_documents(document_ids: list[str]) -> None:
     if not document_ids:
         return
-    url = os.environ.get("DATABASE_URL_MIGRATE", _MIGRATE)
+    url = integration_database_urls()[1]
     engine = create_async_engine(url)
     try:
         async with engine.begin() as conn:

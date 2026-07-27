@@ -1,11 +1,7 @@
-"""Tenant isolation via Postgres RLS (architecture § 4.2 / testing.md).
-
-Skips when DATABASE_URL is unset or unreachable so unit CI without Compose still passes.
-"""
+"""Tenant isolation via Postgres RLS (architecture § 4.2 / testing.md)."""
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
@@ -14,23 +10,17 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from tests.integration_database import integration_database_urls
 
 pytestmark = pytest.mark.integration
 
 
 def _app_url() -> str | None:
-    return os.environ.get("DATABASE_URL")
+    return integration_database_urls()[0]
 
 
 def _migrate_url() -> str | None:
-    raw = os.environ.get("DATABASE_URL_MIGRATE") or os.environ.get("DATABASE_URL")
-    if not raw:
-        return None
-    if raw.startswith("postgresql+psycopg://"):
-        return raw.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1)
-    if raw.startswith("postgresql://"):
-        return raw.replace("postgresql://", "postgresql+asyncpg://", 1)
-    return raw
+    return integration_database_urls()[1]
 
 
 async def _reachable(url: str) -> bool:

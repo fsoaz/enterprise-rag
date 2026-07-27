@@ -16,7 +16,7 @@ from decimal import Decimal
 from typing import Annotated, Any
 
 import redis.asyncio as redis
-from fastapi import Depends
+from fastapi import Depends, HTTPException, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,7 +50,9 @@ async def reset_rate_limiter() -> None:
         await client.close()
 
 
-async def _hit(key: str, *, limit: int, window_seconds: int, settings: Settings) -> bool:
+async def _hit(
+    key: str, *, limit: int, window_seconds: int, settings: Settings
+) -> tuple[bool, int, int]:
     """Count one request in a fixed window. True when the caller is over the limit.
 
     Fails open: a Redis outage must not take the whole API down with it. The
@@ -59,7 +61,7 @@ async def _hit(key: str, *, limit: int, window_seconds: int, settings: Settings)
     """
     client = _get_client(settings)
     if client is None:
-        return False
+        return False, 0, 0
     bucket = int(time.time()) // window_seconds
     redis_key = f"ratelimit:{key}:{bucket}"
     try:
@@ -67,7 +69,8 @@ async def _hit(key: str, *, limit: int, window_seconds: int, settings: Settings)
         pipe.incr(redis_key)
         pipe.expire(redis_key, window_seconds * 2)
         used, _ = await pipe.execute()
-        return int(used) > limit
+        reset = (bucket + 1) * window_seconds
+        return int(used) > limit, int(used), reset
     except Exception:
         # Drop the cached client so the next request rebuilds it. A client created
         # on a since-closed event loop fails permanently otherwise, silently
@@ -75,7 +78,7 @@ async def _hit(key: str, *, limit: int, window_seconds: int, settings: Settings)
         global _client
         _client = None
         logger.warning("rate limit check failed; allowing request", exc_info=True)
-        return False
+        return False, 0, 0
 
 
 def rate_limit(
@@ -86,20 +89,37 @@ def rate_limit(
     async def _checker(
         user: Annotated[AuthUser, Depends(get_current_user)],
         settings: Annotated[Settings, Depends(get_settings)],
+        response: Response,
     ) -> AuthUser:
         limit = int(getattr(settings, limit_attr))
         if limit <= 0:
             return user
-        over = await _hit(
+        over, used, reset = await _hit(
             f"{scope}:{user.tenant_id}:{user.user_id}",
             limit=limit,
             window_seconds=window_seconds,
             settings=settings,
         )
+        if reset:
+            remaining = max(0, limit - used)
+            response.headers.update(
+                {
+                    "RateLimit-Limit": str(limit),
+                    "RateLimit-Remaining": str(remaining),
+                    "RateLimit-Reset": str(reset),
+                }
+            )
         if over:
-            raise QuotaExceededError(
-                f"Rate limit exceeded for {scope}: {limit} requests per "
-                f"{window_seconds}s. Retry shortly."
+            retry_after = max(1, reset - int(time.time()))
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit exceeded for {scope}: {limit} requests per {window_seconds}s.",
+                headers={
+                    "Retry-After": str(retry_after),
+                    "RateLimit-Limit": str(limit),
+                    "RateLimit-Remaining": "0",
+                    "RateLimit-Reset": str(reset),
+                },
             )
         return user
 

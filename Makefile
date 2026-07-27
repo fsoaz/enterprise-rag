@@ -1,4 +1,4 @@
-.PHONY: lint typecheck test format install web-lint web-typecheck up down migrate migrate-check seed
+.PHONY: lint typecheck test test-integration format install web-lint web-typecheck up down migrate migrate-check seed db-reset openapi openapi-check
 
 # Throwaway database for migrate-check. Never the dev database.
 MIGRATE_CHECK_DB ?= rag_migrate_check
@@ -25,6 +25,11 @@ typecheck:
 
 test:
 	uv run pytest -q
+
+# Creates, migrates, seeds, tests, and drops an isolated database. The script
+# validates the target name before either destructive database operation.
+test-integration:
+	bash scripts/run-integration-tests.sh
 
 up:
 	docker compose -f infra/compose/docker-compose.yml up -d --build postgres redis minio minio-init keycloak
@@ -66,3 +71,45 @@ migrate-check:
 	echo ">> OK — migrations apply cleanly from empty"
 	@$(PSQL) -q -c "DROP DATABASE IF EXISTS $(MIGRATE_CHECK_DB);"
 	@echo ">> throwaway database dropped"
+
+# Drop and rebuild the dev database, then re-seed.
+#
+# Integration tests write into whatever database DATABASE_URL points at and leave
+# rows behind — documents, collections, and ACL grants that are not in db/seed.py.
+# Leftover ACL rows silently falsify manual authorization testing in both
+# directions, and leftover documents make every retrieval number a measurement of
+# the residue rather than of the fixture corpus. Run this before quoting either.
+db-reset:
+	@echo ">> dropping and recreating enterprise_rag"
+	@$(PSQL) -q -c "DROP DATABASE IF EXISTS enterprise_rag WITH (FORCE);" -c "CREATE DATABASE enterprise_rag;"
+	@$(PSQL) -q -d enterprise_rag -f /docker-entrypoint-initdb.d/01-init.sql
+	$(MAKE) migrate
+	$(MAKE) seed
+	@echo ">> dev database reset. Reload eval fixtures with:"
+	@echo "   uv run python -m evals.harness.run --load-corpus"
+
+# Regenerate the committed OpenAPI documents from the live app.
+openapi:
+	@uv run python -c "import json, pathlib; from api.main import app; \
+	doc = json.dumps(app.openapi(), indent=2, ensure_ascii=False) + '\n'; \
+	[pathlib.Path(p).write_text(doc) for p in ('openapi.json', 'apps/web/openapi.json')]"
+	@echo ">> openapi.json and apps/web/openapi.json regenerated"
+
+# Fail when the committed schema no longer matches the code. The endpoint
+# inventory is a contract clients are written against; three endpoints were added
+# and the committed document went stale without anything noticing.
+#
+# Compares against a regenerated copy rather than using `git diff`, so the result
+# means "the file disagrees with the code" and not "the file has uncommitted edits".
+openapi-check:
+	@tmp=$$(mktemp -d); \
+	uv run python -c "import json, pathlib, sys; from api.main import app; \
+	pathlib.Path(sys.argv[1]).write_text(json.dumps(app.openapi(), indent=2, ensure_ascii=False) + '\n')" $$tmp/openapi.json; \
+	if ! diff -q openapi.json $$tmp/openapi.json >/dev/null; then \
+	  echo ">> openapi.json is stale — run 'make openapi' and commit the result"; \
+	  diff -u openapi.json $$tmp/openapi.json | head -40; rm -rf $$tmp; exit 1; \
+	fi; \
+	if ! diff -q apps/web/openapi.json $$tmp/openapi.json >/dev/null; then \
+	  echo ">> apps/web/openapi.json has drifted from the root copy"; rm -rf $$tmp; exit 1; \
+	fi; \
+	rm -rf $$tmp; echo ">> openapi.json is in sync with the code"

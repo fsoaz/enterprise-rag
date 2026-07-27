@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import os
 from dataclasses import dataclass
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -129,6 +129,15 @@ GLOBEX = TenantSeed(
 
 SEEDS: tuple[TenantSeed, ...] = (ACME, GLOBEX)
 
+# The development identity provider has to put the same tenant identifier in its
+# signed token that the API resolves in Postgres. Random tenant ids made a static
+# Keycloak realm impossible to provision: every database reset invalidated every
+# token. These UUIDv5 values are stable while remaining namespaced to this project.
+TENANT_IDS: dict[str, UUID] = {
+    spec.slug: uuid5(NAMESPACE_URL, f"https://enterprise-rag.local/tenants/{spec.slug}")
+    for spec in SEEDS
+}
+
 
 def _async_url() -> str:
     url = os.environ.get("DATABASE_URL_MIGRATE") or os.environ.get("DATABASE_URL")
@@ -149,7 +158,7 @@ async def seed_tenant(session: AsyncSession, spec: TenantSeed) -> UUID:
         await _ensure_collection_acl(session, existing.id, spec)
         return existing.id
 
-    tenant_id = uuid4()
+    tenant_id = TENANT_IDS[spec.slug]
     session.add(
         Tenant(
             id=tenant_id,

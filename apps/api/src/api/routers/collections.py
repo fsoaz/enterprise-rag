@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -13,8 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps.auth import CuratorUser, CurrentUser
 from api.deps.db import get_db_session
+from api.pagination import apply_descending_cursor, page_limit, page_rows
 from db.models import Collection
 from domain.errors import ConflictError, NotFoundError
+from domain.types import AclPermission
+from retrieval.acl import resolve_acl
 
 router = APIRouter(prefix="/collections", tags=["collections"])
 
@@ -30,6 +33,11 @@ class CollectionOut(BaseModel):
     name: str
     description: str | None
     default_review_interval_days: int
+
+
+class CollectionPage(BaseModel):
+    data: list[CollectionOut]
+    next_cursor: str | None
 
 
 @router.post("", status_code=201, response_model=CollectionOut)
@@ -61,20 +69,42 @@ async def create_collection(
     )
 
 
-@router.get("", response_model=dict)
+@router.get("", response_model=CollectionPage)
 async def list_collections(
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> dict[str, object]:
-    rows = (
+    limit: int = 200,
+    cursor: Annotated[str | None, Query(max_length=128)] = None,
+) -> CollectionPage:
+    limit = page_limit(limit)
+    resolution = await resolve_acl(
+        session,
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        permission=AclPermission.READ,
+    )
+    stmt = select(Collection).where(Collection.tenant_id == user.tenant_id)
+    if not resolution.subjects.is_admin:
+        stmt = stmt.where(Collection.id.in_(resolution.allowed_collection_ids))
+    stmt = apply_descending_cursor(
+        stmt,
+        created_column=Collection.created_at,
+        id_column=Collection.id,
+        cursor=cursor,
+    )
+    fetched = (
         await session.scalars(
-            select(Collection)
-            .where(Collection.tenant_id == user.tenant_id)
-            .order_by(Collection.name)
+            stmt.order_by(Collection.created_at.desc(), Collection.id.desc()).limit(limit + 1)
         )
     ).all()
-    return {
-        "data": [
+    rows, next_cursor = page_rows(
+        fetched,
+        limit=limit,
+        created_at=lambda row: row.created_at,
+        item_id=lambda row: row.id,
+    )
+    return CollectionPage(
+        data=[
             CollectionOut(
                 id=c.id,
                 name=c.name,
@@ -83,8 +113,8 @@ async def list_collections(
             )
             for c in rows
         ],
-        "next_cursor": None,
-    }
+        next_cursor=next_cursor,
+    )
 
 
 @router.get("/{collection_id}", response_model=CollectionOut)
@@ -93,12 +123,19 @@ async def get_collection(
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> CollectionOut:
-    collection = await session.scalar(
-        select(Collection).where(
-            Collection.id == collection_id,
-            Collection.tenant_id == user.tenant_id,
-        )
+    resolution = await resolve_acl(
+        session,
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        permission=AclPermission.READ,
     )
+    stmt = select(Collection).where(
+        Collection.id == collection_id,
+        Collection.tenant_id == user.tenant_id,
+    )
+    if not resolution.subjects.is_admin:
+        stmt = stmt.where(Collection.id.in_(resolution.allowed_collection_ids))
+    collection = await session.scalar(stmt)
     if collection is None:
         raise NotFoundError(f"No collection {collection_id}")
     return CollectionOut(

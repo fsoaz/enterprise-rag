@@ -8,10 +8,16 @@
  * inlined at build time, so it has to arrive as a Docker build arg rather than a
  * runtime environment entry.
  */
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
-
 /** Dev-only impersonation. Gated so the control cannot ship in a real build. */
-export const DEV_AUTH = (process.env.NEXT_PUBLIC_DEV_AUTH ?? "true").toLowerCase() === "true";
+export const DEV_AUTH = (process.env.NEXT_PUBLIC_DEV_AUTH ?? "false").toLowerCase() === "true";
+
+/**
+ * Production requests stay same-origin and are authenticated by the web BFF.
+ * Only the explicitly enabled development mode calls FastAPI from the browser.
+ */
+export const API_BASE = DEV_AUTH
+  ? (process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000")
+  : "/api/backend";
 
 export type Citation = {
   chunkId: string;
@@ -27,6 +33,9 @@ export type Citation = {
 
 export type Verdict = "grounded" | "partial" | "unsupported";
 
+export type ChatMessage = components["schemas"]["ChatMessage"];
+export type ChatRequest = components["schemas"]["ChatRequest"];
+
 export function authHeaders(user: string): Record<string, string> {
   return DEV_AUTH ? { "X-Dev-User": user } : {};
 }
@@ -40,3 +49,5 @@ export async function problemDetail(response: Response): Promise<string> {
     return `Request failed (${response.status})`;
   }
 }
+
+import type { components } from "@/lib/generated/api";

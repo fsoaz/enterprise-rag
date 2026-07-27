@@ -10,7 +10,7 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 import anyio
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,11 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.deps.auth import AuthUser, CuratorUser, CurrentUser
 from api.deps.db import get_db_session
 from api.deps.limits import UploadRateLimited
+from api.pagination import apply_descending_cursor, page_limit, page_rows
 from api.services import storage
 from api.services.ingest import enqueue_ingest
-from api.services.problems import problem
 from db.models import Collection, Document, DocumentVersion, IngestionJob
 from domain.errors import (
+    ConflictError,
     DomainError,
     NotFoundError,
     PermissionDeniedError,
@@ -131,11 +132,35 @@ class JobOut(BaseModel):
     created_at: datetime
 
 
+class DocumentPage(BaseModel):
+    data: list[DocumentOut]
+    next_cursor: str | None
+
+
+class JobPage(BaseModel):
+    data: list[JobOut]
+    next_cursor: str | None
+
+
 class UploadAccepted(BaseModel):
     document_id: UUID
     version_id: UUID
     job_id: UUID
     dispatch: str
+
+
+class VersionOut(BaseModel):
+    id: UUID
+    version_no: int
+    content_sha256: str
+    effective_from: datetime
+    effective_to: datetime | None
+    parse_status: str
+
+
+class VersionPage(BaseModel):
+    data: list[VersionOut]
+    next_cursor: str | None
 
 
 def _detect_media_type(data: bytes, filename: str) -> str | None:
@@ -186,8 +211,9 @@ async def upload_document(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     file: Annotated[UploadFile, File()],
     collection_id: Annotated[UUID, Form()],
-    title: Annotated[str | None, Form()] = None,
-    language: Annotated[str, Form()] = "en",
+    title: Annotated[str | None, Form(max_length=300)] = None,
+    language: Annotated[str, Form(pattern="^(en|pt)$")] = "en",
+    document_id: Annotated[UUID | None, Form()] = None,
 ) -> UploadAccepted:
     collection = await session.scalar(
         select(Collection).where(
@@ -212,34 +238,80 @@ async def upload_document(
     mime = detected
     doc_title = title or filename
 
-    document_id = uuid4()
+    existing_version = await session.scalar(
+        select(DocumentVersion)
+        .join(Document)
+        .where(
+            Document.tenant_id == user.tenant_id,
+            Document.collection_id == collection_id,
+            Document.erased_at.is_(None),
+            DocumentVersion.content_sha256 == digest,
+        )
+    )
+    if existing_version is not None:
+        raise ConflictError("An identical document version already exists in this collection")
+
+    existing_document: Document | None = None
+    if document_id is not None:
+        existing_document = await session.scalar(
+            select(Document).where(
+                Document.id == document_id,
+                Document.tenant_id == user.tenant_id,
+                Document.erased_at.is_(None),
+            )
+        )
+        if existing_document is None:
+            raise NotFoundError(f"No document {document_id}")
+        if existing_document.collection_id != collection_id:
+            raise ValidationError("A new version must remain in the document collection")
+        await _require_collection_write(session, user, existing_document.collection_id)
+
+    resolved_document_id = document_id or uuid4()
     version_id = uuid4()
     key = storage.storage_key(
         tenant_id=user.tenant_id,
-        document_id=document_id,
+        document_id=resolved_document_id,
         version_id=version_id,
         filename=filename,
     )
 
-    document = Document(
-        id=document_id,
-        tenant_id=user.tenant_id,
-        collection_id=collection_id,
-        title=doc_title,
-        language=language,
-        owner_user_id=user.user_id,
-    )
-    session.add(document)
+    if existing_document is None:
+        document = Document(
+            id=resolved_document_id,
+            tenant_id=user.tenant_id,
+            collection_id=collection_id,
+            title=doc_title,
+            language=language,
+            owner_user_id=user.user_id,
+        )
+        session.add(document)
+        version_no = 1
+        supersedes_id = None
+    else:
+        current = await session.scalar(
+            select(DocumentVersion)
+            .where(
+                DocumentVersion.document_id == existing_document.id,
+                DocumentVersion.effective_to.is_(None),
+            )
+            .with_for_update()
+        )
+        if current is None:
+            raise ConflictError("Document has no current version")
+        current.effective_to = datetime.now(UTC)
+        version_no = current.version_no + 1
+        supersedes_id = current.id
     version = DocumentVersion(
         id=version_id,
         tenant_id=user.tenant_id,
-        document_id=document_id,
-        version_no=1,
+        document_id=resolved_document_id,
+        version_no=version_no,
         content_sha256=digest,
         storage_key=key,
         mime_type=mime,
         effective_from=datetime.now(UTC),
         effective_to=None,
+        supersedes_id=supersedes_id,
         parse_status=ParseStatus.PENDING.value,
     )
     session.add(version)
@@ -284,21 +356,45 @@ async def upload_document(
         dispatch = "failed"
 
     return UploadAccepted(
-        document_id=document_id,
+        document_id=resolved_document_id,
         version_id=version_id,
         job_id=job.id,
         dispatch=dispatch,
     )
 
 
-@router.get("", response_model=dict)
+@router.post("/{document_id}/versions", status_code=202, response_model=UploadAccepted)
+async def upload_document_version(
+    document_id: UUID,
+    user: CuratorUser,
+    limited: UploadRateLimited,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    file: Annotated[UploadFile, File()],
+    collection_id: Annotated[UUID, Form()],
+    title: Annotated[str | None, Form(max_length=300)] = None,
+    language: Annotated[str, Form(pattern="^(en|pt)$")] = "en",
+) -> UploadAccepted:
+    return await upload_document(
+        user=user,
+        _limited=limited,
+        session=session,
+        file=file,
+        collection_id=collection_id,
+        title=title,
+        language=language,
+        document_id=document_id,
+    )
+
+
+@router.get("", response_model=DocumentPage)
 async def list_documents(
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     collection_id: UUID | None = None,
     limit: int = 50,
-) -> dict[str, object]:
-    limit = min(max(limit, 1), 200)
+    cursor: Annotated[str | None, Query(max_length=128)] = None,
+) -> DocumentPage:
+    limit = page_limit(limit)
     stmt = select(Document).where(
         Document.tenant_id == user.tenant_id,
         Document.erased_at.is_(None),
@@ -306,8 +402,23 @@ async def list_documents(
     if collection_id is not None:
         stmt = stmt.where(Document.collection_id == collection_id)
     stmt = await _readable_documents(session, user, stmt=stmt)
-    stmt = stmt.order_by(Document.created_at.desc()).limit(limit)
-    docs = (await session.scalars(stmt)).all()
+    stmt = apply_descending_cursor(
+        stmt,
+        created_column=Document.created_at,
+        id_column=Document.id,
+        cursor=cursor,
+    )
+    fetched = (
+        await session.scalars(
+            stmt.order_by(Document.created_at.desc(), Document.id.desc()).limit(limit + 1)
+        )
+    ).all()
+    docs, next_cursor = page_rows(
+        fetched,
+        limit=limit,
+        created_at=lambda row: row.created_at,
+        item_id=lambda row: row.id,
+    )
 
     # One query for every current version rather than one per document: at the
     # 200-document ceiling this was 201 round trips.
@@ -334,7 +445,7 @@ async def list_documents(
                 current_version_id=current_by_doc.get(doc.id),
             )
         )
-    return {"data": data, "next_cursor": None}
+    return DocumentPage(data=data, next_cursor=next_cursor)
 
 
 @router.get("/{document_id}", response_model=DocumentOut)
@@ -368,12 +479,66 @@ async def get_document(
     )
 
 
-@router.get("/{document_id}/jobs", response_model=dict)
+@router.get("/{document_id}/versions", response_model=VersionPage)
+async def list_document_versions(
+    document_id: UUID,
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    limit: int = 200,
+    cursor: Annotated[str | None, Query(max_length=128)] = None,
+) -> VersionPage:
+    limit = page_limit(limit)
+    stmt = select(Document).where(
+        Document.id == document_id,
+        Document.tenant_id == user.tenant_id,
+        Document.erased_at.is_(None),
+    )
+    if await session.scalar(await _readable_documents(session, user, stmt=stmt)) is None:
+        raise NotFoundError(f"No document {document_id}")
+    version_stmt = apply_descending_cursor(
+        select(DocumentVersion).where(DocumentVersion.document_id == document_id),
+        created_column=DocumentVersion.created_at,
+        id_column=DocumentVersion.id,
+        cursor=cursor,
+    )
+    fetched = (
+        await session.scalars(
+            version_stmt.order_by(
+                DocumentVersion.created_at.desc(), DocumentVersion.id.desc()
+            ).limit(limit + 1)
+        )
+    ).all()
+    versions, next_cursor = page_rows(
+        fetched,
+        limit=limit,
+        created_at=lambda row: row.created_at,
+        item_id=lambda row: row.id,
+    )
+    return VersionPage(
+        data=[
+            VersionOut(
+                id=version.id,
+                version_no=version.version_no,
+                content_sha256=version.content_sha256,
+                effective_from=version.effective_from,
+                effective_to=version.effective_to,
+                parse_status=version.parse_status,
+            )
+            for version in versions
+        ],
+        next_cursor=next_cursor,
+    )
+
+
+@router.get("/{document_id}/jobs", response_model=JobPage)
 async def list_document_jobs(
     document_id: UUID,
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> dict[str, object]:
+    limit: int = 200,
+    cursor: Annotated[str | None, Query(max_length=128)] = None,
+) -> JobPage:
+    limit = page_limit(limit)
     stmt = select(Document).where(
         Document.id == document_id,
         Document.tenant_id == user.tenant_id,
@@ -386,15 +551,27 @@ async def list_document_jobs(
             select(DocumentVersion.id).where(DocumentVersion.document_id == document_id)
         )
     ).all()
-    jobs = (
+    job_stmt = apply_descending_cursor(
+        select(IngestionJob).where(IngestionJob.document_version_id.in_(version_ids)),
+        created_column=IngestionJob.created_at,
+        id_column=IngestionJob.id,
+        cursor=cursor,
+    )
+    fetched = (
         await session.scalars(
-            select(IngestionJob)
-            .where(IngestionJob.document_version_id.in_(version_ids))
-            .order_by(IngestionJob.created_at.desc())
+            job_stmt.order_by(IngestionJob.created_at.desc(), IngestionJob.id.desc()).limit(
+                limit + 1
+            )
         )
     ).all()
-    return {
-        "data": [
+    jobs, next_cursor = page_rows(
+        fetched,
+        limit=limit,
+        created_at=lambda row: row.created_at,
+        item_id=lambda row: row.id,
+    )
+    return JobPage(
+        data=[
             JobOut(
                 id=j.id,
                 document_version_id=j.document_version_id,
@@ -408,8 +585,8 @@ async def list_document_jobs(
             )
             for j in jobs
         ],
-        "next_cursor": None,
-    }
+        next_cursor=next_cursor,
+    )
 
 
 @router.post("/{document_id}/archive", response_model=DocumentOut)
@@ -429,6 +606,11 @@ async def archive_document(
     if doc.archived_at is None:
         doc.archived_at = datetime.now(UTC)
         await session.flush()
+    current = await session.scalar(
+        select(DocumentVersion.id).where(
+            DocumentVersion.document_id == doc.id, DocumentVersion.effective_to.is_(None)
+        )
+    )
     return DocumentOut(
         id=doc.id,
         collection_id=doc.collection_id,
@@ -436,6 +618,7 @@ async def archive_document(
         language=doc.language,
         archived_at=doc.archived_at,
         created_at=doc.created_at,
+        current_version_id=current,
     )
 
 
@@ -455,6 +638,11 @@ async def unarchive_document(
     await _require_collection_write(session, user, doc.collection_id)
     doc.archived_at = None
     await session.flush()
+    current = await session.scalar(
+        select(DocumentVersion.id).where(
+            DocumentVersion.document_id == doc.id, DocumentVersion.effective_to.is_(None)
+        )
+    )
     return DocumentOut(
         id=doc.id,
         collection_id=doc.collection_id,
@@ -462,25 +650,18 @@ async def unarchive_document(
         language=doc.language,
         archived_at=doc.archived_at,
         created_at=doc.created_at,
+        current_version_id=current,
     )
 
 
 @router.delete("/{document_id}")
 async def delete_document(document_id: UUID, user: CurrentUser) -> object:
     del document_id, user
-    return problem(
-        status=405,
-        title="Method Not Allowed",
+    raise HTTPException(
+        status_code=405,
         detail=(
             "Hard delete is not offered. Use POST /api/v1/documents/{id}/archive "
             "or POST /api/v1/admin/documents/{id}/erase."
         ),
-        type_slug="method-not-allowed",
-        extra={
-            "allow": ["GET", "POST"],
-            "alternatives": {
-                "archive": "/api/v1/documents/{id}/archive",
-                "erase": "/api/v1/admin/documents/{id}/erase",
-            },
-        },
+        headers={"Allow": "GET, POST"},
     )

@@ -12,8 +12,16 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Collection, CostLedger, Document, DocumentVersion, Query, QueryCitation
+from domain.text import detect_supported_language
 from domain.types import RetrievalStrategy
-from llm.client import AnthropicClient, JudgeResult, RetrievedChunk, extractive_fallback
+from llm.client import (
+    AnthropicClient,
+    ConversationMessage,
+    Groundedness,
+    JudgeResult,
+    RetrievedChunk,
+    extractive_fallback,
+)
 from llm.groundedness import (
     citation_coverage,
     groundedness_verdict,
@@ -92,12 +100,37 @@ def _use_live_llm(api_key: str) -> bool:
 
 
 _ANSWER_CHUNK_CHARS = 96
+_DEGRADED_MESSAGES = {
+    "en": {
+        "fallback": "Showing source passages — synthesis unavailable.",
+        "unsupported": "I could not find support for this in the documents you have access to.",
+    },
+    "pt": {
+        "fallback": "Exibindo passagens das fontes — síntese indisponível.",
+        "unsupported": "Não encontrei suporte para isso nos documentos aos quais você tem acesso.",
+    },
+}
 
 
 def _chunk_answer(text: str) -> Iterator[str]:
     """Split the verified answer into token-sized pieces for the SSE stream."""
-    for start in range(0, len(text), _ANSWER_CHUNK_CHARS):
-        yield text[start : start + _ANSWER_CHUNK_CHARS]
+    remaining = text
+    while remaining:
+        if len(remaining) <= _ANSWER_CHUNK_CHARS:
+            yield remaining
+            return
+        split_at = remaining.rfind(" ", 0, _ANSWER_CHUNK_CHARS + 1)
+        if split_at <= 0:
+            split_at = _ANSWER_CHUNK_CHARS
+        yield remaining[:split_at]
+        remaining = remaining[split_at:]
+
+
+def fallback_verdict(*, verdict: Groundedness, has_lexical_match: bool) -> Groundedness:
+    """Only show a degraded source list when FTS found query-relevant content."""
+    if has_lexical_match:
+        return "partial"
+    return verdict
 
 
 async def run_chat(
@@ -106,23 +139,28 @@ async def run_chat(
     tenant_id: UUID,
     user_id: UUID,
     question: str,
+    conversation_history: list[ConversationMessage] | None = None,
     strategy: RetrievalStrategy = RetrievalStrategy.HYBRID_RRF,
     anthropic_api_key: str = "",
     stream: bool = False,
+    retrieval_result: Any | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield SSE event dicts for chat completions."""
     started = time.perf_counter()
+    language = detect_supported_language(question)
     yield {"event": "status", "data": {"stage": "retrieving"}}
 
-    result = await retrieve(
-        session,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        query=question,
-        strategy=strategy,
+    result = retrieval_result or await retrieve(
+        session, tenant_id=tenant_id, user_id=user_id, query=question, strategy=strategy
     )
-    titles = await _titles_for_docs(session, [h.document_id for h in result.hits])
-    staleness = await _staleness_for_versions(session, [h.document_version_id for h in result.hits])
+    use_live_llm = _use_live_llm(anthropic_api_key)
+    # Degraded mode shows only chunks backed by primary-language lexical evidence.
+    # Falling back to ``result.hits`` when that evidence is empty defeats the
+    # filter: a query whose terms are all stop words has no evidence at all, and
+    # would otherwise be answered with dense-stub nearest neighbours.
+    source_hits = result.hits if use_live_llm else result.lexical_evidence_hits
+    titles = await _titles_for_docs(session, [h.document_id for h in source_hits])
+    staleness = await _staleness_for_versions(session, [h.document_version_id for h in source_hits])
     chunks = [
         RetrievedChunk(
             chunk_id=str(h.chunk_id),
@@ -132,7 +170,7 @@ async def run_chat(
             score=h.score,
             is_suspect=h.is_suspect,
         )
-        for h in result.hits
+        for h in source_hits
     ]
     scores = [h.score for h in result.hits]
     # Scores are on a strategy-specific scale; retrieval_confidence normalizes by
@@ -142,7 +180,7 @@ async def run_chat(
     yield {"event": "status", "data": {"stage": "generating"}}
 
     generation = None
-    if chunks and _use_live_llm(anthropic_api_key):
+    if chunks and use_live_llm:
         client = AnthropicClient(anthropic_api_key)
         if stream:
             # Consume the model stream but do NOT forward tokens yet. The
@@ -153,7 +191,11 @@ async def run_chat(
             answer_parts: list[str] = []
             citations_acc: list[Any] = []
             usage_data: dict[str, Any] = {}
-            async for evt in client.stream_cited_answer(question=question, chunks=chunks):
+            async for evt in client.stream_cited_answer(
+                question=question,
+                chunks=chunks,
+                conversation_history=conversation_history,
+            ):
                 if evt["event"] == "token":
                     answer_parts.append(evt["data"]["text"])
                 elif evt["event"] == "citation":
@@ -161,7 +203,9 @@ async def run_chat(
                 elif evt["event"] == "usage":
                     usage_data = evt["data"]
                 elif evt["event"] == "error":
-                    generation = extractive_fallback(chunks)
+                    generation = extractive_fallback(
+                        chunks, introduction=_DEGRADED_MESSAGES[language]["fallback"]
+                    )
                     break
                 elif evt["event"] == "done":
                     from llm.client import CitationSpan, GenerationResult
@@ -189,13 +233,26 @@ async def run_chat(
                         cost_usd=Decimal(str(usage_data.get("cost_usd", "0"))),
                     )
         else:
-            generation = await client.generate_cited_answer(question=question, chunks=chunks)
+            generation = await client.generate_cited_answer(
+                question=question,
+                chunks=chunks,
+                conversation_history=conversation_history,
+            )
     else:
-        generation = extractive_fallback(chunks) if chunks else extractive_fallback([])
+        generation = extractive_fallback(
+            chunks, introduction=_DEGRADED_MESSAGES[language]["fallback"]
+        )
 
     if generation is None:
         # Stream ended without a terminal done/error event.
-        generation = extractive_fallback(chunks)
+        generation = extractive_fallback(
+            chunks, introduction=_DEGRADED_MESSAGES[language]["fallback"]
+        )
+
+    # Generation is intentionally buffered until the groundedness gate has seen
+    # the complete answer and citations. Expose that otherwise-invisible work as
+    # a real stage instead of leaving the UI apparently frozen on "generating".
+    yield {"event": "status", "data": {"stage": "verifying"}}
 
     # Build synthetic citations for extractive path when none from model
     if not generation.citations and chunks:
@@ -211,7 +268,9 @@ async def run_chat(
                     cited_text=c.body[:240],
                     start_char=0,
                     end_char=min(240, len(c.body)),
-                    answer_sentence_idx=i,
+                    # A fallback is a list of sources, not a cited answer.  Do
+                    # not claim it supports an invented answer sentence.
+                    answer_sentence_idx=-1,
                 )
                 for i, c in enumerate(chunks[:3])
             ],
@@ -223,9 +282,16 @@ async def run_chat(
             cost_usd=generation.cost_usd,
         )
 
-    coverage = citation_coverage(generation.answer_text, generation.citations)
+    is_extractive_fallback = generation.stop_reason == "extractive_fallback"
+    # Fallback sources deliberately have no sentence binding, so coverage is
+    # zero. Keeping it numeric preserves the established SSE and audit contract.
+    coverage = (
+        0.0
+        if is_extractive_fallback
+        else citation_coverage(generation.answer_text, generation.citations)
+    )
     # Skip live entailment judge when using extractive / stub key (cost + key)
-    labels: list[str] = ["entailed"] * len(generation.citations) if generation.citations else []
+    labels: list[str] = ["unrelated"] * len(generation.citations) if generation.citations else []
     judge: JudgeResult | None = None
     if (
         _use_live_llm(anthropic_api_key)
@@ -238,17 +304,38 @@ async def run_chat(
         labels = judge.labels
 
     verdict = groundedness_verdict(
-        coverage=coverage,
+        coverage=coverage or 0.0,
         entailment_labels=labels,
         confidence=confidence if chunks else 0.0,
     )
+    if is_extractive_fallback:
+        # A degraded source list cannot claim grounding. Dense-stub/RRF rank alone
+        # is not relevance evidence; require a lexical match before showing it.
+        #
+        # The signal has to be the *filtered* evidence, not ``has_lexical_match``:
+        # the latter is true whenever either language config matched, and the
+        # secondary config does not treat the primary language's stop words as
+        # stop words. A query of pure English stop words matches every English
+        # chunk through the Portuguese parse, so it would certify itself.
+        verdict = fallback_verdict(
+            verdict=verdict, has_lexical_match=bool(result.lexical_evidence_hits)
+        )
     abstain = should_abstain(verdict) or not chunks
 
     answer_text = generation.answer_text
     if abstain:
-        answer_text = "I could not find support for this in the documents you have access to."
-        if chunks:
-            answer_text += " Closest sources are attached as citations."
+        answer_text = _DEGRADED_MESSAGES[language]["unsupported"]
+        # Closest-neighbour passages are not evidence for an unsupported answer.
+        generation = type(generation)(
+            answer_text=generation.answer_text,
+            citations=[],
+            model=generation.model,
+            input_tokens=generation.input_tokens,
+            output_tokens=generation.output_tokens,
+            cache_read_input_tokens=generation.cache_read_input_tokens,
+            stop_reason=generation.stop_reason,
+            cost_usd=generation.cost_usd,
+        )
         verdict = "unsupported"
 
     # Single emission point for the answer, reached only after the verdict is known.
@@ -280,9 +367,11 @@ async def run_chat(
             tenant_id=tenant_id,
             user_id=user_id,
             question=question,
-            language="pt" if any(ch in question.lower() for ch in "ãáàçéíóú") else "en",
+            language=language,
             strategy=result.strategy,
-            retrieved_chunk_ids=[h.chunk_id for h in result.hits],
+            retrieved_chunk_ids=list(
+                dict.fromkeys([h.chunk_id for h in [*result.hits, *source_hits]])
+            ),
             rerank_scores=scores or None,
             answer_text=answer_text,
             groundedness_verdict=verdict,

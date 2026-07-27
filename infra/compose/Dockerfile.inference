@@ -13,7 +13,7 @@ COPY pyproject.toml uv.lock ./
 COPY packages/ packages/
 COPY apps/inference/ apps/inference/
 
-RUN uv sync --frozen --no-dev --package enterprise-rag-inference
+RUN uv sync --frozen --no-dev --package enterprise-rag-inference --extra models
 
 ENV PYTHONPATH=/app/apps/inference/src:/app/packages/observability/src
 

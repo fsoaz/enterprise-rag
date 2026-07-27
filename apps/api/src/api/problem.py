@@ -58,6 +58,7 @@ def problem_response(
     detail: str,
     request: Request,
     errors: list[dict[str, str]] | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> JSONResponse:
     request_id = get_request_id(request)
     body: dict[str, Any] = {
@@ -69,6 +70,8 @@ def problem_response(
         "request_id": request_id,
         "errors": errors or [],
     }
+    if extra:
+        body.update(extra)
     return JSONResponse(
         status_code=status,
         content=body,

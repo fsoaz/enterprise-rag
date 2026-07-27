@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+import httpx
 from fastapi import APIRouter, Response
 from sqlalchemy import text
 
@@ -45,6 +46,16 @@ async def _check_redis() -> bool:
         return False
 
 
+async def _check_inference() -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(f"{get_settings().inference_base_url.rstrip('/')}/ready")
+        return response.status_code == 200
+    except httpx.HTTPError:
+        logger.warning("readiness: inference unreachable", exc_info=True)
+        return False
+
+
 @router.get("/ready")
 async def ready(response: Response) -> dict[str, object]:
     """Readiness — reports 503 when a hard dependency is down.
@@ -56,6 +67,7 @@ async def ready(response: Response) -> dict[str, object]:
     checks = {
         "database": await _check_database(),
         "redis": await _check_redis(),
+        "inference": await _check_inference(),
     }
     ok = all(checks.values())
     if not ok:

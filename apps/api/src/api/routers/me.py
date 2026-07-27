@@ -44,7 +44,10 @@ async def me(user: Annotated[AuthUser, Depends(get_current_user)]) -> MeResponse
     )
 
 
-@router.get("/debug/users", response_model=list[VisibleUser])
+# Kept out of the OpenAPI document: the route 404s unless DEV_AUTH_BYPASS is on, so
+# publishing it in the schema advertises an endpoint that does not exist in any real
+# deployment and reads as part of the supported surface.
+@router.get("/debug/users", response_model=list[VisibleUser], include_in_schema=False)
 async def debug_visible_users(
     _user: Annotated[AuthUser, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db_session)],

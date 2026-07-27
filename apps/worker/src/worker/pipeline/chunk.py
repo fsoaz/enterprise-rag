@@ -3,107 +3,16 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
+from domain.text import detect_supported_language
 from domain.types import DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_TOKENS
 from worker.pipeline.parse import ParsedDocument
 
 # Approx tokens ≈ words for Latin scripts; chars/4 as fallback for dense text.
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 _WORD_RE = re.compile(r"\S+")
-
-_PT_MARKERS = frozenset(
-    {
-        "de",
-        "da",
-        "do",
-        "das",
-        "dos",
-        "que",
-        "não",
-        "nao",
-        "para",
-        "com",
-        "uma",
-        "um",
-        "os",
-        "as",
-        "é",
-        "e",
-        "em",
-        "por",
-        "se",
-        "como",
-        "mais",
-        "ou",
-        "ser",
-        "pelo",
-        "pela",
-        "também",
-        "tambem",
-        "está",
-        "esta",
-        "são",
-        "sao",
-        "foi",
-        "sobre",
-        "entre",
-        "quando",
-        "muito",
-        "já",
-        "ja",
-        "há",
-        "ha",
-        "após",
-        "apos",
-        "através",
-        "atraves",
-        "política",
-        "politica",
-        "segurança",
-        "seguranca",
-        "documento",
-    }
-)
-_EN_MARKERS = frozenset(
-    {
-        "the",
-        "and",
-        "of",
-        "to",
-        "in",
-        "a",
-        "is",
-        "for",
-        "on",
-        "with",
-        "as",
-        "by",
-        "that",
-        "this",
-        "from",
-        "are",
-        "be",
-        "or",
-        "an",
-        "at",
-        "it",
-        "was",
-        "not",
-        "have",
-        "has",
-        "will",
-        "can",
-        "their",
-        "which",
-        "policy",
-        "security",
-        "document",
-        "shall",
-        "must",
-        "should",
-    }
-)
 
 
 @dataclass(slots=True)
@@ -126,39 +35,76 @@ def estimate_tokens(text: str) -> int:
 
 
 def detect_language(text: str) -> str:
-    """Cheap PT vs EN heuristic from function-word overlap."""
-    tokens = [t.lower().strip(".,;:!?\"'()[]{}") for t in _WORD_RE.findall(text.lower())]
-    if not tokens:
-        return "en"
-    pt = sum(1 for t in tokens if t in _PT_MARKERS)
-    en = sum(1 for t in tokens if t in _EN_MARKERS)
-    if pt > en:
-        return "pt"
-    return "en"
+    """Compatibility wrapper around the shared user/document detector."""
+    return detect_supported_language(text)
 
 
 def score_injection_risk(text: str) -> float:
-    """Simple keyword heuristic for prompt-injection patterns (architecture § 9)."""
-    lower = text.lower()
-    patterns = (
-        ("ignore previous instructions", 0.9),
-        ("ignore all instructions", 0.9),
-        ("disregard previous", 0.85),
-        ("system prompt", 0.7),
-        ("you are now", 0.6),
-        ("jailbreak", 0.95),
-        ("do not follow the policy", 0.8),
-        ("reveal your instructions", 0.85),
-        ("ignore as instruções", 0.9),
-        ("ignore as instrucoes", 0.9),
-        ("prompt injection", 0.75),
-        ("<|im_start|>", 0.95),
-        ("[inst]", 0.7),
+    """Score structural instruction override and exfiltration language.
+
+    This remains a conservative deterministic classifier, not a claim of general
+    prompt-injection immunity.  It normalizes accents and simple whitespace
+    obfuscation, and combines multilingual action/target concepts so paraphrases do
+    not depend on one exact 13-entry phrase list.
+    """
+    normalized = unicodedata.normalize("NFKD", text.casefold())
+    lower = "".join(char for char in normalized if not unicodedata.combining(char))
+    lower = re.sub(r"\s+", " ", lower)
+    # "i g n o r e" / "r e v e a l" is a common low-effort filter bypass.
+    lower = re.sub(
+        r"(?<!\w)(?:[a-z]\s+){3,}[a-z](?!\w)",
+        lambda match: match.group(0).replace(" ", ""),
+        lower,
     )
+
     score = 0.0
-    for needle, weight in patterns:
-        if needle in lower:
-            score = max(score, weight)
+    if any(marker in lower for marker in ("<|im_start|>", "<|system|>", "[inst]", "<<sys>>")):
+        score = 0.95
+    if "jailbreak" in lower or "prompt injection" in lower:
+        score = max(score, 0.95)
+
+    override_action = re.search(
+        r"\b(ignore|disregard|forget|bypass|override|desconsidere|ignora|olvide|"
+        r"oublie[rz]?|ignorez|vergiss|ignoriere)\b",
+        lower,
+    )
+    authority_target = re.search(
+        r"\b(previous|prior|above|all|system|developer|instructions?|rules?|policy|"
+        r"instrucoes?|orientacoes?|anteriores?|todas?|sistema|"
+        r"instrucciones?|reglas?|consignes?|precedentes?|regles?|"
+        r"anweisungen?|vorherigen?)\b",
+        lower,
+    )
+    if override_action and authority_target:
+        score = max(score, 0.9)
+
+    exfil_action = re.search(
+        r"\b(reveal|print|show|output|repeat|expose|mostre|revele|imprima|"
+        r"muestre|revela|affiche[rz]?|revele[rz]?|zeige)\b",
+        lower,
+    )
+    protected_target = re.search(
+        r"\b(system prompt|hidden (?:prompt|instructions?)|your instructions?|"
+        r"configuration|secrets?|prompt do sistema|instrucoes? ocultas?|configuracao|"
+        r"prompt del sistema|instrucciones? ocultas?|invite systeme|"
+        r"consignes? cachees?|system[- ]prompt|versteckte anweisungen?)\b",
+        lower,
+    )
+    safe_negation = re.search(
+        r"\b(?:must\s+never|never|do\s+not|dont|nao|nunca|no|ne\s+pas|nicht)\s+"
+        r"(?:reveal|print|show|output|expose|mostre|revele|imprima|muestre|revela|"
+        r"affiche[rz]?|revele[rz]?|zeige)\b",
+        lower,
+    )
+    if exfil_action and protected_target and not safe_negation:
+        score = max(score, 0.85)
+
+    if re.search(
+        r"\b(you are now|act as|a partir de agora|finja que|ahora eres|"
+        r"actua como|agis comme|du bist jetzt)\b",
+        lower,
+    ):
+        score = max(score, 0.6)
     # Dense instruction-like imperatives in short chunks.
     if re.search(r"\b(always|never|must)\s+(say|answer|respond|output)\b", lower):
         score = max(score, 0.5)

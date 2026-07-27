@@ -14,13 +14,14 @@ from typing import Annotated
 from uuid import UUID
 
 import anyio
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps.auth import AclAdminUser
 from api.deps.db import get_db_session
+from api.pagination import apply_descending_cursor, page_limit, page_rows
 from api.services import storage
 from db.models import Chunk, Document, DocumentVersion, ErasureLog, QueryCitation
 from domain.errors import ConflictError, NotFoundError
@@ -41,6 +42,65 @@ class EraseResponse(BaseModel):
     versions_affected: int
     citations_affected: int
     objects_deleted: int
+
+
+class ErasureOut(BaseModel):
+    id: UUID
+    document_id: UUID
+    actor_user_id: UUID | None
+    reason: str
+    legal_basis: str
+    versions_affected: int
+    citations_affected: int
+    created_at: datetime
+
+
+class ErasurePage(BaseModel):
+    data: list[ErasureOut]
+    next_cursor: str | None
+
+
+@router.get("/erasures", response_model=ErasurePage)
+async def list_erasures(
+    user: AclAdminUser,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    limit: int = 200,
+    cursor: Annotated[str | None, Query(max_length=128)] = None,
+) -> ErasurePage:
+    limit = page_limit(limit)
+    stmt = apply_descending_cursor(
+        select(ErasureLog).where(ErasureLog.tenant_id == user.tenant_id),
+        created_column=ErasureLog.created_at,
+        id_column=ErasureLog.id,
+        cursor=cursor,
+    )
+    fetched = (
+        await session.scalars(
+            stmt.order_by(ErasureLog.created_at.desc(), ErasureLog.id.desc()).limit(limit + 1)
+        )
+    ).all()
+    rows, next_cursor = page_rows(
+        fetched,
+        limit=limit,
+        created_at=lambda row: row.created_at,
+        item_id=lambda row: row.id,
+    )
+    return ErasurePage(
+        data=[
+            ErasureOut(
+                id=row.id,
+                document_id=row.document_id,
+                actor_user_id=row.actor_user_id,
+                reason=row.reason,
+                legal_basis=row.legal_basis,
+                versions_affected=row.versions_affected,
+                citations_affected=row.citations_affected,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ],
+        next_cursor=next_cursor,
+    )
 
 
 @router.post("/documents/{document_id}/erase", response_model=EraseResponse)

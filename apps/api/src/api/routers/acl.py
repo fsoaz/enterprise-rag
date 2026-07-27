@@ -5,13 +5,14 @@ from __future__ import annotations
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps.auth import AclAdminUser
 from api.deps.db import get_db_session
+from api.pagination import apply_descending_cursor, page_limit, page_rows
 from db.models import AclEntry
 from retrieval.acl import create_acl_entry
 
@@ -42,6 +43,11 @@ class AclEntryOut(BaseModel):
     effect: str
 
 
+class AclEntryPage(BaseModel):
+    data: list[AclEntryOut]
+    next_cursor: str | None
+
+
 @router.post("/entries", status_code=201, response_model=AclEntryOut)
 async def post_acl_entry(
     body: AclEntryCreate,
@@ -69,21 +75,40 @@ async def post_acl_entry(
     )
 
 
-@router.get("/entries", response_model=dict)
+@router.get("/entries", response_model=AclEntryPage)
 async def list_acl_entries(
     user: AclAdminUser,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     resource_type: ResourceType | None = None,
     resource_id: UUID | None = None,
-) -> dict[str, object]:
+    limit: int = 200,
+    cursor: Annotated[str | None, Query(max_length=128)] = None,
+) -> AclEntryPage:
+    limit = page_limit(limit)
     stmt = select(AclEntry).where(AclEntry.tenant_id == user.tenant_id)
     if resource_type is not None:
         stmt = stmt.where(AclEntry.resource_type == resource_type)
     if resource_id is not None:
         stmt = stmt.where(AclEntry.resource_id == resource_id)
-    rows = (await session.scalars(stmt.order_by(AclEntry.created_at.desc()).limit(200))).all()
-    return {
-        "data": [
+    stmt = apply_descending_cursor(
+        stmt,
+        created_column=AclEntry.created_at,
+        id_column=AclEntry.id,
+        cursor=cursor,
+    )
+    fetched = (
+        await session.scalars(
+            stmt.order_by(AclEntry.created_at.desc(), AclEntry.id.desc()).limit(limit + 1)
+        )
+    ).all()
+    rows, next_cursor = page_rows(
+        fetched,
+        limit=limit,
+        created_at=lambda row: row.created_at,
+        item_id=lambda row: row.id,
+    )
+    return AclEntryPage(
+        data=[
             AclEntryOut(
                 id=e.id,
                 subject_type=e.subject_type,
@@ -95,5 +120,5 @@ async def list_acl_entries(
             )
             for e in rows
         ],
-        "next_cursor": None,
-    }
+        next_cursor=next_cursor,
+    )

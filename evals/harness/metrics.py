@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +18,7 @@ class EvalItem:
     language: str = "en"
     acting_user: str | None = None
     as_of: str | None = None
+    must_exclude_chunk_ids: list[str] = field(default_factory=list)
 
 
 def load_dataset(path: Path) -> list[EvalItem]:
@@ -41,6 +42,7 @@ def load_dataset(path: Path) -> list[EvalItem]:
                         str(raw["acting_user"]) if raw.get("acting_user") is not None else None
                     ),
                     as_of=str(raw["as_of"]) if raw.get("as_of") is not None else None,
+                    must_exclude_chunk_ids=[str(x) for x in raw.get("must_exclude_chunk_ids", [])],
                 )
             )
     return items

@@ -19,7 +19,7 @@ router = APIRouter(prefix="/feedback", tags=["feedback"])
 class FeedbackRequest(BaseModel):
     query_id: UUID
     rating: Literal["up", "down"]
-    reason_code: str | None = None
+    reason_code: str | None = Field(default=None, max_length=100)
     comment: str | None = Field(default=None, max_length=2000)
 
 

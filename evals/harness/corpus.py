@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import (
@@ -82,7 +82,10 @@ async def _ensure_collection(
         session.add(collection)
         await session.flush()
 
-    for group_name in [str(g) for g in spec.get("read_groups", [])]:  # type: ignore[union-attr]
+    raw_groups = spec.get("read_groups", [])
+    if not isinstance(raw_groups, list):
+        raise CorpusError(f"collection {name!r} read_groups must be a list")
+    for group_name in [str(group) for group in raw_groups]:
         group_id = await session.scalar(
             select(Group.id).where(Group.tenant_id == tenant_id, Group.name == group_name)
         )
@@ -127,11 +130,7 @@ async def _ensure_version_chunks(
     if not text_chunks:
         raise CorpusError(f"fixture {fixture.name} produced no chunks")
 
-    stale = (
-        await session.scalars(select(Chunk).where(Chunk.document_version_id == version.id))
-    ).all()
-    for old in stale:
-        await session.delete(old)
+    await session.execute(delete(Chunk).where(Chunk.document_version_id == version.id))
     await session.flush()
 
     rows: list[Chunk] = []

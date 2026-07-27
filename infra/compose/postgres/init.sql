@@ -18,7 +18,16 @@ BEGIN
 END
 $$;
 
-GRANT CONNECT ON DATABASE enterprise_rag TO rag_migrate, rag_app, rag_maint;
+-- The same bootstrap is used for the disposable integration database. Resolve
+-- the current database rather than granting only the development database name.
+DO $$
+BEGIN
+  EXECUTE format(
+    'GRANT CONNECT ON DATABASE %I TO rag_migrate, rag_app, rag_maint',
+    current_database()
+  );
+END
+$$;
 GRANT USAGE, CREATE ON SCHEMA public TO rag_migrate;
 GRANT USAGE ON SCHEMA public TO rag_app, rag_maint;
 

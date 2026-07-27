@@ -85,6 +85,13 @@ class GenerationResult:
 
 Groundedness = Literal["grounded", "partial", "unsupported"]
 
+
+@dataclass(frozen=True, slots=True)
+class ConversationMessage:
+    role: Literal["user", "assistant"]
+    content: str
+
+
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -173,6 +180,23 @@ class AnthropicClient:
             )
         return blocks
 
+    def _messages(
+        self,
+        *,
+        question: str,
+        chunks: list[RetrievedChunk],
+        conversation_history: list[ConversationMessage] | None,
+    ) -> list[dict[str, Any]]:
+        history = [
+            {"role": message.role, "content": message.content}
+            for message in (conversation_history or [])
+        ]
+        current_content: list[dict[str, Any]] = [
+            *self._document_blocks(chunks),
+            {"type": "text", "text": question},
+        ]
+        return [*history, {"role": "user", "content": current_content}]
+
     @retry(
         wait=wait_exponential_jitter(initial=0.5, max=8),
         stop=stop_after_attempt(3),
@@ -184,14 +208,11 @@ class AnthropicClient:
         *,
         question: str,
         chunks: list[RetrievedChunk],
+        conversation_history: list[ConversationMessage] | None = None,
         model: str | None = None,
         max_tokens: int = MAX_TOKENS_NONSTREAMING,
     ) -> GenerationResult:
         model_id = model or PRIMARY_MODEL
-        content: list[dict[str, Any]] = [
-            *self._document_blocks(chunks),
-            {"type": "text", "text": question},
-        ]
         response = await self._client.messages.create(  # type: ignore[call-overload]
             model=model_id,
             max_tokens=max_tokens,
@@ -202,7 +223,11 @@ class AnthropicClient:
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
-            messages=[{"role": "user", "content": content}],
+            messages=self._messages(
+                question=question,
+                chunks=chunks,
+                conversation_history=conversation_history,
+            ),
             thinking={"type": "adaptive"},
             output_config={"effort": "high"},
             stream=False,
@@ -305,15 +330,12 @@ class AnthropicClient:
         *,
         question: str,
         chunks: list[RetrievedChunk],
+        conversation_history: list[ConversationMessage] | None = None,
         model: str | None = None,
         max_tokens: int = MAX_TOKENS_STREAMING,
     ) -> AsyncIterator[dict[str, Any]]:
         """Yield SSE-shaped dicts: token | citation | usage | done | error."""
         model_id = model or PRIMARY_MODEL
-        content: list[dict[str, Any]] = [
-            *self._document_blocks(chunks),
-            {"type": "text", "text": question},
-        ]
         try:
             async with self._client.messages.stream(
                 model=model_id,
@@ -325,7 +347,11 @@ class AnthropicClient:
                         "cache_control": {"type": "ephemeral"},
                     }
                 ],
-                messages=[{"role": "user", "content": content}],  # type: ignore[typeddict-item]
+                messages=self._messages(
+                    question=question,
+                    chunks=chunks,
+                    conversation_history=conversation_history,
+                ),  # type: ignore[arg-type]
                 thinking={"type": "adaptive"},
                 output_config={"effort": "high"},
             ) as stream:
@@ -428,10 +454,14 @@ class AnthropicClient:
         )
 
 
-def extractive_fallback(chunks: list[RetrievedChunk]) -> GenerationResult:
+def extractive_fallback(
+    chunks: list[RetrievedChunk],
+    *,
+    introduction: str = "Showing source passages — synthesis unavailable.",
+) -> GenerationResult:
     """Degraded mode when generation is unavailable — return top passages."""
     parts = [f"[{c.document_title}]\n{c.body}" for c in chunks[:3]]
-    text = "Showing source passages — synthesis unavailable.\n\n" + "\n\n---\n\n".join(parts)
+    text = f"{introduction}\n\n" + "\n\n---\n\n".join(parts)
     citations = [
         CitationSpan(
             chunk_id=c.chunk_id,
@@ -440,7 +470,9 @@ def extractive_fallback(chunks: list[RetrievedChunk]) -> GenerationResult:
             cited_text=c.body[:200],
             start_char=0,
             end_char=min(200, len(c.body)),
-            answer_sentence_idx=i,
+            # This fallback lists source passages; it does not generate claims
+            # with sentence-level support.
+            answer_sentence_idx=-1,
         )
         for i, c in enumerate(chunks[:3])
     ]

@@ -19,6 +19,9 @@ dependencies = [
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
+    # Starlette 1.x TestClient uses httpx2. Keeping this explicit prevents its
+    # deprecated httpx compatibility path from hanging during ASGI lifespan.
+    "httpx2>=2.7.0,<3",
     "httpx>=0.28.0",
     "ruff>=0.9.0",
     "mypy>=1.14.0",

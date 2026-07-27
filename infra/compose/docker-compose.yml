@@ -60,13 +60,16 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
-    command: start-dev
+    command: start-dev --import-realm
     ports:
       - "${BIND_ADDR:-127.0.0.1}:8080:8080"
     environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
       KC_HTTP_PORT: 8080
+      KC_HOSTNAME: http://localhost:8080
+    volumes:
+      - ./keycloak/enterprise-rag-realm.json:/opt/keycloak/data/import/enterprise-rag-realm.json:ro
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
       interval: 10s
@@ -93,14 +96,16 @@ services:
       S3_ENDPOINT_URL: http://minio:9000
       INFERENCE_BASE_URL: http://inference:8001
       INFERENCE_SERVICE_TOKEN: dev-inference-token
-      OIDC_ISSUER: http://keycloak:8080/realms/enterprise-rag
+      OIDC_ISSUER: http://localhost:8080/realms/enterprise-rag
       OIDC_JWKS_URL: http://keycloak:8080/realms/enterprise-rag/protocol/openid-connect/certs
-      # Local demo stack only — trusts the X-Dev-User header. Never enable off a dev machine.
-      DEV_AUTH_BYPASS: "true"
+      # Explicit opt-in escape hatch. The default Compose path exercises real OIDC.
+      DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-false}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      inference:
         condition: service_healthy
     command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
@@ -126,6 +131,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      inference:
+        condition: service_healthy
     command: ["celery", "-A", "worker.celery_app.celery_app", "worker", "--loglevel=INFO"]
 
   inference:
@@ -137,9 +144,20 @@ services:
     environment:
       LOG_LEVEL: INFO
       INFERENCE_SERVICE_TOKEN: dev-inference-token
+      INFERENCE_BACKEND: ${INFERENCE_BACKEND:-bge}
+      INFERENCE_DEVICE: ${INFERENCE_DEVICE:-cpu}
+      HF_HOME: /models/huggingface
+    volumes:
+      - inference_models:/models
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/ready')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10m
 
   web:
     build:
@@ -150,11 +168,22 @@ services:
       # running container, where the already-compiled bundle never reads it.
       args:
         NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
+        NEXT_PUBLIC_DEV_AUTH: ${DEV_AUTH_BYPASS:-false}
+    environment:
+      API_BASE_URL: http://api:8000
+      APP_BASE_URL: http://localhost:3000
+      OIDC_ISSUER: http://localhost:8080/realms/enterprise-rag
+      OIDC_INTERNAL_BASE_URL: http://keycloak:8080
+      OIDC_CLIENT_ID: enterprise-rag-web
     ports:
       - "${BIND_ADDR:-127.0.0.1}:3000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_started
+      keycloak:
+        condition: service_healthy
 
 volumes:
   postgres_data:
   minio_data:
+  inference_models:

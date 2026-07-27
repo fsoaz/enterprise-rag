@@ -109,6 +109,7 @@ async def run(args: argparse.Namespace) -> int:
         # the groundedness gate in the chat service, which this harness does not
         # exercise — do not read this as an abstention rate.
         empty_retrieval_by_slice: dict[str, list[bool]] = defaultdict(list)
+        injection_exclusions: list[bool] = []
         per_item: list[dict[str, object]] = []
 
         for item in items:
@@ -131,6 +132,9 @@ async def run(args: argparse.Namespace) -> int:
                 rows_by_slice[item.slice].append(scored)
             if item.should_abstain:
                 empty_retrieval_by_slice[item.slice].append(not result.hits)
+            excluded = not bool(set(retrieved_labels).intersection(item.must_exclude_chunk_ids))
+            if item.must_exclude_chunk_ids:
+                injection_exclusions.append(excluded)
             per_item.append(
                 {
                     "id": item.id,
@@ -142,12 +146,17 @@ async def run(args: argparse.Namespace) -> int:
                     "should_abstain": item.should_abstain,
                     "retrieved_count": len(result.hits),
                     "unsupported_as_of": item.as_of is not None,
+                    "must_exclude": item.must_exclude_chunk_ids,
+                    "excluded": excluded if item.must_exclude_chunk_ids else None,
                 }
             )
 
         await session.rollback()
 
     all_rows = [row for rows in rows_by_slice.values() for row in rows]
+    injection_exclusion_rate = (
+        sum(injection_exclusions) / len(injection_exclusions) if injection_exclusions else None
+    )
     report: dict[str, object] = {
         "strategy": args.strategy,
         "tenant": args.tenant,
@@ -155,6 +164,10 @@ async def run(args: argparse.Namespace) -> int:
         "items": len(items),
         "slices": sorted({i.slice for i in items}),
         "overall": aggregate_retrieval_metrics(all_rows),
+        "security": {
+            "injection_exclusion_rate": injection_exclusion_rate,
+            "injection_cases": len(injection_exclusions),
+        },
         "by_slice": {
             name: {
                 "retrieval": aggregate_retrieval_metrics(rows_by_slice.get(name, [])),
@@ -170,6 +183,16 @@ async def run(args: argparse.Namespace) -> int:
     if args.verbose:
         report["items_detail"] = per_item
     print(json.dumps(report, indent=2))
+    if (
+        injection_exclusion_rate is not None
+        and injection_exclusion_rate < args.min_injection_exclusion
+    ):
+        print(
+            "injection exclusion gate failed: "
+            f"{injection_exclusion_rate:.3f} < {args.min_injection_exclusion:.3f}",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
@@ -181,6 +204,12 @@ def main() -> None:
     parser.add_argument("--tenant", default=DEFAULT_TENANT)
     parser.add_argument("--user", default=DEFAULT_USER)
     parser.add_argument("--top-k", type=int, default=10)
+    parser.add_argument(
+        "--min-injection-exclusion",
+        type=float,
+        default=1.0,
+        help="Fail when known injection chunks are retrieved (default: 1.0).",
+    )
     parser.add_argument(
         "--load-corpus",
         action="store_true",

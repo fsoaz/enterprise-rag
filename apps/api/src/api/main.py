@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.problem import (
     attach_request_id,
@@ -47,6 +48,18 @@ app.add_middleware(
 
 app.middleware("http")(attach_request_id)
 
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next: object) -> object:
+    response = await call_next(request)  # type: ignore[operator]
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+    response.headers.setdefault("Cache-Control", "no-store, private")
+    return response
+
+
 app.include_router(health.router)
 app.include_router(me.router)
 app.include_router(collections.router, prefix="/api/v1")
@@ -74,12 +87,18 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         type_slug = "not-found"
     elif exc.status_code == 422:
         type_slug = "validation-failed"
+    elif exc.status_code == 429:
+        type_slug = "rate-limited"
+    elif exc.status_code == 405:
+        type_slug = "method-not-allowed"
     detail = exc.detail if isinstance(exc.detail, str) else "Request failed"
     titles = {
         401: "Unauthorized",
         403: "Permission denied",
         404: "Not found",
         422: "Validation failed",
+        429: "Rate limited",
+        405: "Method Not Allowed",
     }
     response = problem_response(
         status=exc.status_code,
@@ -91,6 +110,15 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     if exc.headers:
         response.headers.update({k: str(v) for k, v in exc.headers.items()})
     return response
+
+
+@app.exception_handler(StarletteHTTPException)
+async def starlette_http_exception_handler(
+    request: Request, exc: StarletteHTTPException
+) -> JSONResponse:
+    return await http_exception_handler(
+        request, HTTPException(status_code=exc.status_code, detail=exc.detail, headers=exc.headers)
+    )
 
 
 @app.exception_handler(RequestValidationError)

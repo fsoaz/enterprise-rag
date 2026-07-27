@@ -325,7 +325,7 @@ class Chunk(Base):
     updated_at: Mapped[datetime] = _updated_at()
 
     embeddings: Mapped[list[ChunkEmbedding]] = relationship(
-        "ChunkEmbedding", back_populates="chunk"
+        "ChunkEmbedding", back_populates="chunk", passive_deletes=True
     )
 
     __table_args__ = (

@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     llm_fallback_model: str = "claude-sonnet-5"
 
     redis_url: str = "redis://localhost:16379/0"
+    inference_base_url: str = "http://localhost:8001"
 
     # Per-user request caps. Chat is tightest because each call is a billable
     # generation plus an embedding; 0 disables a limit.

@@ -17,7 +17,7 @@ from domain.types import (
 from retrieval.acl import resolve_acl
 from retrieval.dense import dense_search, embed_query
 from retrieval.fusion import reciprocal_rank_fusion
-from retrieval.lexical import lexical_search
+from retrieval.lexical import LEXICAL_MIN_EVIDENCE_TERMS, lexical_search
 from retrieval.rerank import rerank_documents
 
 
@@ -28,6 +28,7 @@ class RetrievalHit:
     document_version_id: UUID
     body: str
     score: float
+    matched_lexical_terms: int = 0
     injection_risk: float = 0.0
 
     @property
@@ -41,6 +42,8 @@ class RetrievalResult:
     hits: list[RetrievalHit]
     strategy: str
     acl_version: int
+    has_lexical_match: bool
+    lexical_evidence_hits: list[RetrievalHit]
 
 
 def _detect_language_hint(query: str) -> str:
@@ -99,7 +102,10 @@ async def retrieve(
                 )
             )
 
-    if need_lexical:
+    # Even dense_only needs lexical evidence in degraded mode: hash vectors make
+    # a rank available for every query, which is not relevance evidence. This
+    # does not alter dense-only ranking; it only provides safe fallback sources.
+    if need_lexical or strategy_value == RetrievalStrategy.DENSE_ONLY.value:
         for lhit in await lexical_search(
             session,
             tenant_id=tenant_id,
@@ -115,6 +121,7 @@ async def retrieve(
                     document_version_id=lhit.document_version_id,
                     body=lhit.body,
                     score=lhit.score,
+                    matched_lexical_terms=lhit.matched_terms,
                     injection_risk=lhit.injection_risk,
                 )
             )
@@ -169,4 +176,15 @@ async def retrieve(
         else:
             hits = fused_hits[:top_k]
 
-    return RetrievalResult(hits=hits, strategy=strategy_value, acl_version=acl.acl_version)
+    return RetrievalResult(
+        hits=hits,
+        strategy=strategy_value,
+        acl_version=acl.acl_version,
+        has_lexical_match=bool(lexical_hits),
+        # Evidence is the subset carrying enough distinct question terms to be
+        # worth showing without a model to synthesise from. ``has_lexical_match``
+        # above stays broad: it describes retrieval, not evidence.
+        lexical_evidence_hits=[
+            hit for hit in lexical_hits if hit.matched_lexical_terms >= LEXICAL_MIN_EVIDENCE_TERMS
+        ][:top_k],
+    )

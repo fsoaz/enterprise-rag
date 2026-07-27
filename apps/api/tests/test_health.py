@@ -25,7 +25,7 @@ def test_ready_reports_each_dependency() -> None:
     response = client.get("/ready")
     assert response.status_code in {200, 503}
     body = response.json()
-    assert set(body["checks"]) == {"database", "redis"}
+    assert set(body["checks"]) == {"database", "redis", "inference"}
     if all(body["checks"].values()):
         assert response.status_code == 200
         assert body["status"] == "ready"

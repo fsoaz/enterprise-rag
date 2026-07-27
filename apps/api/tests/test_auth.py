@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import os
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from tests.integration_database import integration_database_urls
 
 from api.deps.auth import reset_auth_caches
 from api.main import app
@@ -13,40 +12,13 @@ from api.settings import clear_settings_cache
 from db.models import User
 from db.session import reset_engine, set_tenant_context
 
-_LOCAL_APP = "postgresql+asyncpg://rag_app:rag_app@localhost:15432/enterprise_rag"
-_LOCAL_MIGRATE = "postgresql+asyncpg://rag_migrate:rag_migrate@localhost:15432/enterprise_rag"
-
 
 def _app_url() -> str:
-    if url := os.environ.get("TEST_DATABASE_URL"):
-        return url
-    if os.environ.get("CI") == "true":
-        return os.environ.get(
-            "DATABASE_URL",
-            "postgresql+asyncpg://rag_app:rag_app@localhost:5432/enterprise_rag",
-        )
-    return _LOCAL_APP
+    return integration_database_urls()[0]
 
 
 def _migrate_url() -> str:
-    if url := os.environ.get("TEST_DATABASE_URL_MIGRATE"):
-        return _to_async(url)
-    if os.environ.get("CI") == "true":
-        return _to_async(
-            os.environ.get(
-                "DATABASE_URL_MIGRATE",
-                "postgresql+psycopg://rag_migrate:rag_migrate@localhost:5432/enterprise_rag",
-            )
-        )
-    return _LOCAL_MIGRATE
-
-
-def _to_async(url: str) -> str:
-    if url.startswith("postgresql+psycopg://"):
-        return url.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1)
-    if url.startswith("postgresql://"):
-        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    return url
+    return integration_database_urls()[1]
 
 
 async def _db_reachable(url: str) -> bool:
