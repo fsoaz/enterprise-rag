@@ -81,15 +81,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <div className="fixed right-4 top-3 z-50 flex items-center gap-3 rounded border border-neutral-300 bg-white/95 px-3 py-1.5 text-xs dark:border-neutral-700 dark:bg-neutral-950/95">
+      <header className="sticky top-0 z-50 flex max-w-full flex-wrap items-center justify-end gap-3 border-b border-neutral-300 bg-white/95 px-4 py-1.5 text-xs dark:border-neutral-700 dark:bg-neutral-950/95">
         <LocaleSwitch />
-        <span>{session.user.email}</span>
+        <span className="max-w-[12rem] truncate sm:max-w-[16rem]">{session.user.email}</span>
         <form action="/api/auth/logout" method="post">
           <button type="submit" className="underline">
             {t("signOut")}
           </button>
         </form>
-      </div>
+      </header>
       {children}
     </>
   );

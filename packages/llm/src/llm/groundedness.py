@@ -121,6 +121,10 @@ def groundedness_verdict(
 ) -> Groundedness:
     if any(label == "contradicted" for label in entailment_labels):
         return "unsupported"
+    # Unmatched judge pairs default to ``unrelated`` — treat an entirely
+    # unmatched set as unsupported rather than silently grounding.
+    if entailment_labels and all(label == "unrelated" for label in entailment_labels):
+        return "unsupported"
     if coverage < coverage_floor or confidence < confidence_floor:
         return "unsupported"
     if coverage < 0.9 or any(label == "partial" for label in entailment_labels):

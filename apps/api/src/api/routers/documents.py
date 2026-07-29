@@ -100,6 +100,8 @@ async def _readable_documents(
     RLS already scopes rows to the tenant; this adds the per-collection and
     per-document ACL that /search applies, so document metadata (titles,
     collection membership) is not enumerable by every tenant member.
+    Erased documents are excluded here so every route that uses this helper
+    returns 404 consistently.
     """
     resolution = await resolve_acl(
         session,
@@ -107,7 +109,7 @@ async def _readable_documents(
         user_id=user.user_id,
         permission=AclPermission.READ,
     )
-    return stmt.where(document_acl_predicate(resolution))
+    return stmt.where(Document.erased_at.is_(None), document_acl_predicate(resolution))
 
 
 class DocumentOut(BaseModel):
@@ -245,6 +247,7 @@ async def upload_document(
             Document.tenant_id == user.tenant_id,
             Document.collection_id == collection_id,
             Document.erased_at.is_(None),
+            DocumentVersion.effective_to.is_(None),
             DocumentVersion.content_sha256 == digest,
         )
     )

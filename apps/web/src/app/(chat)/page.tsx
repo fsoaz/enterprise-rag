@@ -32,9 +32,28 @@ type CompletedTurn = {
 };
 
 /** Split an answer into sentences, keeping each sentence's index. */
+const ABBREV_BEFORE_PERIOD = /\b(?:Dr|Mr|Mrs|Ms|Sec|vs|etc|Inc|Ltd|Jr|Sr)\.$/i;
+
 function splitSentences(text: string): string[] {
-  const parts = text.split(/(?<=[.!?])\s+/);
-  return parts.filter((part) => part.trim().length > 0);
+  const stripped = text.trim();
+  if (!stripped) return [];
+  const boundary = /(?<=[.!?])\s+/g;
+  const parts: string[] = [];
+  let last = 0;
+  let match = boundary.exec(stripped);
+  while (match !== null) {
+    if (ABBREV_BEFORE_PERIOD.test(stripped.slice(0, match.index).replace(/\s+$/, ""))) {
+      match = boundary.exec(stripped);
+      continue;
+    }
+    const part = stripped.slice(last, match.index);
+    if (part.trim()) parts.push(part);
+    last = match.index + match[0].length;
+    match = boundary.exec(stripped);
+  }
+  const tail = stripped.slice(last);
+  if (tail.trim()) parts.push(tail);
+  return parts;
 }
 
 const STALENESS_TONE: Record<string, string> = {
@@ -54,6 +73,7 @@ export default function ChatPage() {
   const [queryId, setQueryId] = useState<string | null>(null);
   const [user, setUser] = useState("acme-member");
   const [busy, setBusy] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feedbackState, setFeedbackState] = useState<string | null>(null);
   const [feedbackRating, setFeedbackRating] = useState<"up" | "down" | null>(null);
@@ -94,6 +114,7 @@ export default function ChatPage() {
     abortRef.current = null;
     setBusy(false);
     setStatus(null);
+    setCancelled(true);
   }, []);
 
   async function onSubmit(event: React.FormEvent) {
@@ -115,6 +136,7 @@ export default function ChatPage() {
     const requestBody: ChatRequest = { messages, stream: true, strategy: "hybrid_rrf" };
 
     setBusy(true);
+    setCancelled(false);
     setAnswer("");
     answerRef.current = "";
     setCitations([]);
@@ -326,8 +348,21 @@ export default function ChatPage() {
           </p>
         ) : null}
         <p role="status" className="sr-only">
-          {!busy && answer ? t("answerReady", { count: renderedCitations.length }) : ""}
+          {cancelled && answer
+            ? t("answerCancelled")
+            : !busy && answer
+              ? t("answerReady", { count: renderedCitations.length })
+              : ""}
         </p>
+
+        {cancelled && answer ? (
+          <div
+            role="status"
+            className="rounded border border-neutral-400/60 bg-neutral-50 p-3 text-neutral-800 dark:bg-neutral-900/40 dark:text-neutral-200"
+          >
+            {t("answerCancelled")}
+          </div>
+        ) : null}
 
         {error ? (
           <div

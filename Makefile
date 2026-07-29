@@ -32,6 +32,7 @@ test-integration:
 	bash scripts/run-integration-tests.sh
 
 up:
+	@if [ ! -f .env ]; then cp .env.example .env && echo "Created .env from .env.example — edit secrets as needed."; fi
 	docker compose -f infra/compose/docker-compose.yml up -d --build postgres redis minio minio-init keycloak
 	@echo "Waiting for Postgres..."
 	@until docker compose -f infra/compose/docker-compose.yml exec -T postgres pg_isready -U postgres -d enterprise_rag >/dev/null 2>&1; do sleep 1; done

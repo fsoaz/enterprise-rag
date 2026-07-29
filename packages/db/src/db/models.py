@@ -668,6 +668,9 @@ class ErasureLog(Base):
     legal_basis: Mapped[str] = mapped_column(Text, nullable=False)
     versions_affected: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     citations_affected: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    queries_affected: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    objects_failed: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    failed_storage_keys: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     created_at: Mapped[datetime] = _created_at()
     # Append-only: no updated_at mutation semantics, but column kept for convention consistency.
     updated_at: Mapped[datetime] = _updated_at()

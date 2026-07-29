@@ -25,6 +25,20 @@ def test_groundedness_abstain() -> None:
     assert verdict == "unsupported"
 
 
+def test_groundedness_all_unrelated_is_unsupported() -> None:
+    """Vary only labels: all-unrelated must not ground when coverage/conf pass."""
+    kwargs = {"coverage": 0.95, "confidence": 0.9}
+    assert (
+        groundedness_verdict(entailment_labels=["unrelated", "unrelated"], **kwargs)
+        == "unsupported"
+    )
+    assert groundedness_verdict(entailment_labels=["entailed", "entailed"], **kwargs) == "grounded"
+    assert (
+        groundedness_verdict(entailment_labels=["entailed", "contradicted"], **kwargs)
+        == "unsupported"
+    )
+
+
 def test_citation_coverage() -> None:
     cites = [
         CitationSpan(

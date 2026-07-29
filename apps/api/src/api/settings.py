@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # Rolling 24h ceiling on a tenant's recorded spend; 0 disables the guard.
     tenant_daily_budget_usd: float = 25.0
 
+    # Comma-separated browser origins allowed to call the API with credentials.
+    # Empty means CORS is disabled (the Next.js BFF is the only intended client).
+    cors_allow_origins: str = ""
+
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     log_level: str = "INFO"

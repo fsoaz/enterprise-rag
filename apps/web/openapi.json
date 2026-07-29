@@ -2330,9 +2330,17 @@
             "type": "integer",
             "title": "Citations Affected"
           },
+          "queries_affected": {
+            "type": "integer",
+            "title": "Queries Affected"
+          },
           "objects_deleted": {
             "type": "integer",
             "title": "Objects Deleted"
+          },
+          "objects_failed": {
+            "type": "integer",
+            "title": "Objects Failed"
           }
         },
         "type": "object",
@@ -2341,7 +2349,9 @@
           "erased_at",
           "versions_affected",
           "citations_affected",
-          "objects_deleted"
+          "queries_affected",
+          "objects_deleted",
+          "objects_failed"
         ],
         "title": "EraseResponse"
       },
@@ -2385,6 +2395,28 @@
             "type": "integer",
             "title": "Citations Affected"
           },
+          "queries_affected": {
+            "type": "integer",
+            "title": "Queries Affected"
+          },
+          "objects_failed": {
+            "type": "integer",
+            "title": "Objects Failed"
+          },
+          "failed_storage_keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed Storage Keys"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -2400,6 +2432,9 @@
           "legal_basis",
           "versions_affected",
           "citations_affected",
+          "queries_affected",
+          "objects_failed",
+          "failed_storage_keys",
           "created_at"
         ],
         "title": "ErasureOut"

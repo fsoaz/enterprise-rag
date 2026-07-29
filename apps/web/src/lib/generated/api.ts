@@ -553,8 +553,12 @@ export interface components {
       versions_affected: number;
       /** Citations Affected */
       citations_affected: number;
+      /** Queries Affected */
+      queries_affected: number;
       /** Objects Deleted */
       objects_deleted: number;
+      /** Objects Failed */
+      objects_failed: number;
     };
     /** ErasureOut */
     ErasureOut: {
@@ -578,6 +582,12 @@ export interface components {
       versions_affected: number;
       /** Citations Affected */
       citations_affected: number;
+      /** Queries Affected */
+      queries_affected: number;
+      /** Objects Failed */
+      objects_failed: number;
+      /** Failed Storage Keys */
+      failed_storage_keys: string[] | null;
       /**
        * Created At
        * Format: date-time

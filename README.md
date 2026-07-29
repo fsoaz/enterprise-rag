@@ -40,7 +40,7 @@ No orchestration framework, no managed vector database. Both are deliberate — 
 | **Permission-aware retrieval** | ACLs are compiled into the ranking query, not applied afterwards. Post-filtering silently collapses recall and leaks result counts. |
 | **Native citations** | Character-level spans returned by the API, not `[1]`/`[2]` markers the model could invent — and the UI links each answer sentence to the span that supports it. |
 | **Unsupported-answer detection** | With a live model: citation coverage + an entailment judge + retrieval confidence, the last normalized per strategy so one threshold is meaningful across all four. Without one, the degraded path has no judge and no synthesis, so it abstains unless full-text search finds real evidence — never `grounded`. See [ADR-012](docs/context/architecture.md#adr-012--degraded-mode-evidence-is-lexical-or-it-does-not-exist). |
-| **Enforced injection defense** | Multilingual structural injection patterns are scored at ingest and filtered in SQL on both retrieval arms; borderline chunks reach the model labelled `[UNTRUSTED]`. The eval report measures exclusion rate; this is defense in depth, not a claim of universal jailbreak immunity. |
+| **Enforced injection defense** | Multilingual injection patterns are scored at ingest and acted on in SQL on both retrieval arms. Structural chat-template markers are filtered out entirely; linguistic patterns — override, jailbreak, exfiltration — stay retrievable and reach the model labelled `[UNTRUSTED]`, so a security policy that quotes the vocabulary is still answerable. The eval report measures exclusion rate; this is defense in depth, not a claim of universal jailbreak immunity. |
 | **Evaluation harness** | Eight-slice bilingual golden set for local, reproducible measurement. CI/eval dashboard integration is not implemented. |
 | **Retrieval-strategy comparison** | The harness can compare strategies; results from stub embeddings must not be treated as semantic-quality claims. |
 | **Tokens never reach the browser** | The Next.js server runs the OIDC exchange and proxies every API call with the bearer header attached. An XSS in the UI cannot exfiltrate a credential, because there is none in the page. See [ADR-013](docs/context/architecture.md#adr-013--the-browser-never-holds-a-token). |
@@ -61,6 +61,10 @@ browser ──▶ Next.js server ──▶ FastAPI api ──┬──▶ Postgr
 Full diagram and component contracts: [architecture.md § 3](docs/context/architecture.md#3-component-topology).
 
 ## Documentation
+
+Architecture notes, ADRs, and the review register are maintained outside this
+repository (local `docs/` is intentionally untracked). Paths below describe that
+local tree when present.
 
 ### Context — what and why
 

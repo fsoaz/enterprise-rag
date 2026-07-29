@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+import logging
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -10,8 +10,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Chunk, ChunkEmbedding, Document, DocumentVersion
+from domain.embeddings import embedding_model_meta
 from domain.types import DEFAULT_TOP_K_RETRIEVAL, INJECTION_RISK_BLOCK
 from retrieval.acl import AclResolution, document_acl_predicate
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,13 +27,6 @@ class DenseHit:
     injection_risk: float = 0.0
 
 
-def _active_embedding_meta() -> tuple[str, str]:
-    return (
-        os.environ.get("EMBEDDING_MODEL_NAME", "BAAI/bge-m3"),
-        os.environ.get("EMBEDDING_MODEL_VERSION", "stub-v0"),
-    )
-
-
 async def dense_search(
     session: AsyncSession,
     *,
@@ -39,7 +35,7 @@ async def dense_search(
     acl: AclResolution,
     top_k: int = DEFAULT_TOP_K_RETRIEVAL,
 ) -> list[DenseHit]:
-    model_name, model_version = _active_embedding_meta()
+    model_name, model_version = embedding_model_meta()
     # Cosine distance operator <=> ; similarity = 1 - distance.
     distance = ChunkEmbedding.embedding.cosine_distance(query_vector)
 
@@ -70,6 +66,13 @@ async def dense_search(
         .limit(top_k)
     )
     rows = (await session.execute(stmt)).all()
+    if not rows:
+        logger.warning(
+            "dense_search: zero embedding rows for model_name=%s model_version=%s "
+            "(backend/version mismatch or empty corpus)",
+            model_name,
+            model_version,
+        )
     return [
         DenseHit(
             chunk_id=row[0],

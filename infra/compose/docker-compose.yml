@@ -84,7 +84,8 @@ services:
     ports:
       - "${BIND_ADDR:-127.0.0.1}:8000:8000"
     env_file:
-      - ../../.env.example
+      - path: ../../.env
+        required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@postgres:5432/enterprise_rag
       DATABASE_URL_SYNC: postgresql+psycopg://rag_app:rag_app@postgres:5432/enterprise_rag
@@ -114,7 +115,8 @@ services:
       context: ../..
       dockerfile: infra/compose/Dockerfile.api
     env_file:
-      - ../../.env.example
+      - path: ../../.env
+        required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@postgres:5432/enterprise_rag
       DATABASE_URL_SYNC: postgresql+psycopg://rag_app:rag_app@postgres:5432/enterprise_rag

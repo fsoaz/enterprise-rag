@@ -24,7 +24,8 @@ function authError(detail: string): NextResponse {
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const providerError = request.nextUrl.searchParams.get("error");
   if (providerError) {
-    return authError(request.nextUrl.searchParams.get("error_description") ?? providerError);
+    // Never reflect provider error_description — attacker-controlled phishing text.
+    return authError("Sign-in was cancelled or denied by the identity provider.");
   }
 
   const code = request.nextUrl.searchParams.get("code");

@@ -93,11 +93,31 @@ class ConversationMessage:
 
 
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
+_ABBREV_BEFORE_PERIOD = re.compile(r"(?i)\b(?:Dr|Mr|Mrs|Ms|Sec|vs|etc|Inc|Ltd|Jr|Sr)\.$")
+
+
+def _is_abbrev_boundary(text: str, match_start: int) -> bool:
+    """True when the period before this boundary belongs to an abbreviation."""
+    return bool(_ABBREV_BEFORE_PERIOD.search(text[:match_start].rstrip()))
 
 
 def split_sentences(text: str) -> list[str]:
-    parts = _SENTENCE_BOUNDARY.split(text.strip())
-    return [p for p in parts if p.strip()]
+    stripped = text.strip()
+    if not stripped:
+        return []
+    parts: list[str] = []
+    last = 0
+    for match in _SENTENCE_BOUNDARY.finditer(stripped):
+        if _is_abbrev_boundary(stripped, match.start()):
+            continue
+        part = stripped[last : match.start()]
+        if part.strip():
+            parts.append(part)
+        last = match.end()
+    tail = stripped[last:]
+    if tail.strip():
+        parts.append(tail)
+    return parts
 
 
 def sentence_start_offsets(text: str) -> list[int]:
@@ -114,6 +134,8 @@ def sentence_start_offsets(text: str) -> list[int]:
     lead = len(text) - len(text.lstrip())
     offsets = [0]
     for match in _SENTENCE_BOUNDARY.finditer(stripped):
+        if _is_abbrev_boundary(stripped, match.start()):
+            continue
         offsets.append(match.end())
     # Drop offsets belonging to trailing empty splits.
     return [o + lead for o in offsets if o < len(stripped) + lead]

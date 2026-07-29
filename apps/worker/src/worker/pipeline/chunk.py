@@ -7,7 +7,11 @@ import unicodedata
 from dataclasses import dataclass
 
 from domain.text import detect_supported_language
-from domain.types import DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_TOKENS
+from domain.types import (
+    DEFAULT_CHUNK_OVERLAP,
+    DEFAULT_CHUNK_TOKENS,
+    INJECTION_RISK_LINGUISTIC,
+)
 from worker.pipeline.parse import ParsedDocument
 
 # Approx tokens ≈ words for Latin scripts; chars/4 as fallback for dense text.
@@ -46,6 +50,10 @@ def score_injection_risk(text: str) -> float:
     prompt-injection immunity.  It normalizes accents and simple whitespace
     obfuscation, and combines multilingual action/target concepts so paraphrases do
     not depend on one exact 13-entry phrase list.
+
+    Only structural chat-template markers score at or above the hard-block
+    threshold. Linguistic patterns cap in the flag band so policy prose that
+    shares vocabulary stays retrievable and reaches the model as [UNTRUSTED].
     """
     normalized = unicodedata.normalize("NFKD", text.casefold())
     lower = "".join(char for char in normalized if not unicodedata.combining(char))
@@ -58,10 +66,12 @@ def score_injection_risk(text: str) -> float:
     )
 
     score = 0.0
+    # Hard-block band: markers with no benign reading in a document corpus.
     if any(marker in lower for marker in ("<|im_start|>", "<|system|>", "[inst]", "<<sys>>")):
         score = 0.95
+
     if "jailbreak" in lower or "prompt injection" in lower:
-        score = max(score, 0.95)
+        score = max(score, INJECTION_RISK_LINGUISTIC)
 
     override_action = re.search(
         r"\b(ignore|disregard|forget|bypass|override|desconsidere|ignora|olvide|"
@@ -76,7 +86,7 @@ def score_injection_risk(text: str) -> float:
         lower,
     )
     if override_action and authority_target:
-        score = max(score, 0.9)
+        score = max(score, INJECTION_RISK_LINGUISTIC)
 
     exfil_action = re.search(
         r"\b(reveal|print|show|output|repeat|expose|mostre|revele|imprima|"
@@ -97,7 +107,7 @@ def score_injection_risk(text: str) -> float:
         lower,
     )
     if exfil_action and protected_target and not safe_negation:
-        score = max(score, 0.85)
+        score = max(score, INJECTION_RISK_LINGUISTIC)
 
     if re.search(
         r"\b(you are now|act as|a partir de agora|finja que|ahora eres|"

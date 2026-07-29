@@ -1,7 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { appBaseUrl, clearAuthCookies, ID_COOKIE, oidcMetadata } from "@/lib/auth/server";
+import { sameOriginMutation } from "@/lib/same-origin";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  if (!sameOriginMutation(request)) {
+    return NextResponse.json({ detail: "Cross-site request rejected" }, { status: 403 });
+  }
   const metadata = await oidcMetadata();
   const logout = metadata.end_session_endpoint
     ? new URL(metadata.end_session_endpoint)

@@ -51,6 +51,6 @@ async def embed_passages(
 
 
 def embedding_model_meta() -> tuple[str, str]:
-    name = os.environ.get("EMBEDDING_MODEL_NAME", "BAAI/bge-m3")
-    version = os.environ.get("EMBEDDING_MODEL_VERSION", "stub-v0")
-    return name, version
+    from domain.embeddings import embedding_model_meta as _meta
+
+    return _meta()

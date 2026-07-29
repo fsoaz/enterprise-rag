@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { API_BASE, authHeaders, DEV_AUTH, problemDetail } from "@/lib/api";
 import { LocaleSwitch, useLocale } from "@/lib/i18n";
 
@@ -28,6 +28,9 @@ export default function AdminPage() {
   const [user, setUser] = useState("acme-steward");
   const [collections, setCollections] = useState<Collection[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [documentsCursor, setDocumentsCursor] = useState<string | null>(null);
+  const [loadingDocuments, setLoadingDocuments] = useState(false);
+  const loadingDocumentsRef = useRef(false);
   const [collectionId, setCollectionId] = useState("");
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -59,21 +62,36 @@ export default function AdminPage() {
     }
   }, [locale, t, user]);
 
-  const loadDocuments = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_BASE}/api/v1/documents?limit=100`, {
-        headers: { "Accept-Language": locale, ...authHeaders(user) },
-      });
-      if (!response.ok) {
-        setMessage(await problemDetail(response));
-        return;
+  const loadDocuments = useCallback(
+    async (cursor?: string | null) => {
+      if (loadingDocumentsRef.current) return;
+      loadingDocumentsRef.current = true;
+      setLoadingDocuments(true);
+      try {
+        const params = new URLSearchParams({ limit: "100" });
+        if (cursor) params.set("cursor", cursor);
+        const response = await fetch(`${API_BASE}/api/v1/documents?${params}`, {
+          headers: { "Accept-Language": locale, ...authHeaders(user) },
+        });
+        if (!response.ok) {
+          setMessage(await problemDetail(response));
+          return;
+        }
+        const body = (await response.json()) as {
+          data: Document[];
+          next_cursor: string | null;
+        };
+        setDocuments((current) => (cursor ? [...current, ...body.data] : body.data));
+        setDocumentsCursor(body.next_cursor);
+      } catch (err) {
+        setMessage(t("loadDocumentsFailed", { detail: String(err) }));
+      } finally {
+        loadingDocumentsRef.current = false;
+        setLoadingDocuments(false);
       }
-      const body = (await response.json()) as { data: Document[] };
-      setDocuments(body.data);
-    } catch (err) {
-      setMessage(t("loadDocumentsFailed", { detail: String(err) }));
-    }
-  }, [locale, t, user]);
+    },
+    [locale, t, user],
+  );
 
   useEffect(() => {
     void Promise.all([loadCollections(), loadDocuments()]);
@@ -403,6 +421,16 @@ export default function AdminPage() {
               })}
             </ul>
           )}
+          {documentsCursor ? (
+            <button
+              type="button"
+              className="self-start rounded border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-neutral-700"
+              disabled={loadingDocuments}
+              onClick={() => void loadDocuments(documentsCursor)}
+            >
+              {t("loadMore")}
+            </button>
+          ) : null}
         </section>
 
         <nav className="text-sm">

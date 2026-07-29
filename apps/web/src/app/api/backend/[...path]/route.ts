@@ -8,6 +8,7 @@ import {
   type TokenSet,
   tokenCookies,
 } from "@/lib/auth/server";
+import { sameOriginMutation } from "@/lib/same-origin";
 
 type RouteContext = { params: Promise<{ path: string[] }> };
 
@@ -24,13 +25,6 @@ const HOP_BY_HOP = new Set([
   "transfer-encoding",
   "upgrade",
 ]);
-
-function sameOriginMutation(request: NextRequest): boolean {
-  if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return true;
-  const origin = request.headers.get("origin");
-  const fetchSite = request.headers.get("sec-fetch-site");
-  return (!origin || origin === request.nextUrl.origin) && fetchSite !== "cross-site";
-}
 
 function requestHeaders(request: NextRequest, accessToken: string): Headers {
   const headers = new Headers();

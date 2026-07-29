@@ -1,7 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const body = (await request.json()) as { locale?: unknown };
+  let body: { locale?: unknown };
+  try {
+    body = (await request.json()) as { locale?: unknown };
+  } catch {
+    return NextResponse.json({ detail: "Unsupported locale" }, { status: 422 });
+  }
   if (body.locale !== "en" && body.locale !== "pt") {
     return NextResponse.json({ detail: "Unsupported locale" }, { status: 422 });
   }

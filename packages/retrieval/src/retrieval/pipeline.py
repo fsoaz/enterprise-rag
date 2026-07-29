@@ -7,6 +7,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from domain.text import detect_supported_language
 from domain.types import (
     DEFAULT_RRF_K,
     DEFAULT_TOP_K_RERANK,
@@ -47,10 +48,7 @@ class RetrievalResult:
 
 
 def _detect_language_hint(query: str) -> str:
-    # Lightweight reuse of PT markers without importing worker.
-    pt_markers = {"de", "que", "não", "nao", "para", "uma", "política", "politica", "segurança"}
-    tokens = {t.lower().strip(".,;:!?") for t in query.split()}
-    return "pt" if tokens & pt_markers else "en"
+    return detect_supported_language(query)
 
 
 async def retrieve(
