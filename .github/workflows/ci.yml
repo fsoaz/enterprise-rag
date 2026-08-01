@@ -244,3 +244,20 @@ jobs:
       - name: Inference logs on failure
         if: failure()
         run: cat "$RUNNER_TEMP/inference.log" || true
+
+  # Catches Dockerfile / compose regressions that unit tests never see (BUG-001,
+  # BUG-003 env wiring, BUG-011 context). Build only — do not start the stack.
+  container-build:
+    name: Container images
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build compose images
+        run: |
+          cp .env.example .env
+          docker compose --env-file .env -f infra/compose/docker-compose.yml build
