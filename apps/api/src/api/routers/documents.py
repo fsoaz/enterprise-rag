@@ -120,6 +120,7 @@ class DocumentOut(BaseModel):
     archived_at: datetime | None
     created_at: datetime
     current_version_id: UUID | None = None
+    legal_hold: bool = False
 
 
 class JobOut(BaseModel):
@@ -446,6 +447,7 @@ async def list_documents(
                 archived_at=doc.archived_at,
                 created_at=doc.created_at,
                 current_version_id=current_by_doc.get(doc.id),
+                legal_hold=doc.legal_hold,
             )
         )
     return DocumentPage(data=data, next_cursor=next_cursor)
@@ -479,6 +481,7 @@ async def get_document(
         archived_at=doc.archived_at,
         created_at=doc.created_at,
         current_version_id=current,
+        legal_hold=doc.legal_hold,
     )
 
 
@@ -622,6 +625,7 @@ async def archive_document(
         archived_at=doc.archived_at,
         created_at=doc.created_at,
         current_version_id=current,
+        legal_hold=doc.legal_hold,
     )
 
 
@@ -654,6 +658,7 @@ async def unarchive_document(
         archived_at=doc.archived_at,
         created_at=doc.created_at,
         current_version_id=current,
+        legal_hold=doc.legal_hold,
     )
 
 

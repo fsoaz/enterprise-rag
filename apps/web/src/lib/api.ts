@@ -29,6 +29,8 @@ export type Citation = {
   /** Index of the answer sentence this citation supports. */
   answerSentenceIdx: number;
   staleness: string;
+  /** Passage matched prompt-injection heuristics at ingest. */
+  isSuspect: boolean;
 };
 
 export type Verdict = "grounded" | "partial" | "unsupported";

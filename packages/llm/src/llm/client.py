@@ -487,11 +487,18 @@ def extractive_fallback(
     introduction: str = "Showing source passages — synthesis unavailable.",
 ) -> GenerationResult:
     """Degraded mode when generation is unavailable — return top passages."""
-    parts = [f"[{c.document_title}]\n{c.body}" for c in chunks[:3]]
+    parts: list[str] = []
+    for c in chunks[:3]:
+        body = c.body
+        if c.is_suspect:
+            body = f"[UNTRUSTED SOURCE]\n{body}"
+        parts.append(f"[{c.document_title}]\n{body}")
     text = f"{introduction}\n\n" + "\n\n---\n\n".join(parts)
     citations = []
     for c in chunks[:3]:
         cited_text, end_char = _truncate_cited_text(c.body)
+        if c.is_suspect:
+            cited_text = f"[UNTRUSTED SOURCE] {cited_text}"
         citations.append(
             CitationSpan(
                 chunk_id=c.chunk_id,

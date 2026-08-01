@@ -1404,6 +1404,74 @@
         }
       }
     },
+    "/api/v1/acl/entries/{entry_id}": {
+      "delete": {
+        "tags": [
+          "acl"
+        ],
+        "summary": "Delete Acl Entry Route",
+        "operationId": "delete_acl_entry_route_api_v1_acl_entries__entry_id__delete",
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Entry Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-Dev-User",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-User"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/chat/completions": {
       "post": {
         "tags": [
@@ -1457,10 +1525,18 @@
         },
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "When stream=false: JSON batch of the same events. When stream=true: SSE frames (`event:` + `data:` JSON).",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ChatCompletionsJsonResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "SSE stream. Each frame: event: <name>\\ndata: <json>\\n\\n. Event names and data shapes match ChatStreamEvent (status, token, citation, usage, verdict, done, error)."
+                }
               }
             }
           },
@@ -1804,6 +1880,92 @@
           }
         }
       }
+    },
+    "/api/v1/admin/documents/{document_id}/legal-hold": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Set Legal Hold",
+        "description": "Place or lift a legal hold so erasure can be blocked or re-enabled.",
+        "operationId": "set_legal_hold_api_v1_admin_documents__document_id__legal_hold_post",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Document Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-Dev-User",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-User"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LegalHoldRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalHoldResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2027,6 +2189,57 @@
         ],
         "title": "Body_upload_document_version_api_v1_documents__document_id__versions_post"
       },
+      "ChatCompletionsJsonResponse": {
+        "properties": {
+          "events": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/StatusEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/TokenEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/CitationEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/UsageEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/VerdictEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/DoneEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/ErrorEvent"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "event",
+                "mapping": {
+                  "citation": "#/components/schemas/CitationEvent",
+                  "done": "#/components/schemas/DoneEvent",
+                  "error": "#/components/schemas/ErrorEvent",
+                  "status": "#/components/schemas/StatusEvent",
+                  "token": "#/components/schemas/TokenEvent",
+                  "usage": "#/components/schemas/UsageEvent",
+                  "verdict": "#/components/schemas/VerdictEvent"
+                }
+              }
+            },
+            "type": "array",
+            "title": "Events"
+          }
+        },
+        "type": "object",
+        "required": [
+          "events"
+        ],
+        "title": "ChatCompletionsJsonResponse",
+        "description": "Body when ``stream: false`` — same events as the SSE stream, batched."
+      },
       "ChatMessage": {
         "properties": {
           "role": {
@@ -2101,6 +2314,77 @@
         },
         "type": "object",
         "title": "ChatRequest"
+      },
+      "CitationEvent": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "const": "citation",
+            "title": "Event"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CitationEventData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event",
+          "data"
+        ],
+        "title": "CitationEvent"
+      },
+      "CitationEventData": {
+        "properties": {
+          "answer_sentence_idx": {
+            "type": "integer",
+            "title": "Answer Sentence Idx"
+          },
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id"
+          },
+          "document_version_id": {
+            "type": "string",
+            "title": "Document Version Id"
+          },
+          "cited_text": {
+            "type": "string",
+            "title": "Cited Text"
+          },
+          "start_char": {
+            "type": "integer",
+            "title": "Start Char"
+          },
+          "end_char": {
+            "type": "integer",
+            "title": "End Char"
+          },
+          "document_title": {
+            "type": "string",
+            "title": "Document Title"
+          },
+          "staleness": {
+            "type": "string",
+            "title": "Staleness"
+          },
+          "is_suspect": {
+            "type": "boolean",
+            "title": "Is Suspect"
+          }
+        },
+        "type": "object",
+        "required": [
+          "answer_sentence_idx",
+          "chunk_id",
+          "document_version_id",
+          "cited_text",
+          "start_char",
+          "end_char",
+          "document_title",
+          "staleness",
+          "is_suspect"
+        ],
+        "title": "CitationEventData"
       },
       "CollectionCreate": {
         "properties": {
@@ -2247,6 +2531,11 @@
               }
             ],
             "title": "Current Version Id"
+          },
+          "legal_hold": {
+            "type": "boolean",
+            "title": "Legal Hold",
+            "default": false
           }
         },
         "type": "object",
@@ -2287,6 +2576,37 @@
           "next_cursor"
         ],
         "title": "DocumentPage"
+      },
+      "DoneEvent": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "const": "done",
+            "title": "Event"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DoneEventData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event",
+          "data"
+        ],
+        "title": "DoneEvent"
+      },
+      "DoneEventData": {
+        "properties": {
+          "query_id": {
+            "type": "string",
+            "title": "Query Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query_id"
+        ],
+        "title": "DoneEventData"
       },
       "EraseRequest": {
         "properties": {
@@ -2466,6 +2786,37 @@
           "next_cursor"
         ],
         "title": "ErasurePage"
+      },
+      "ErrorEvent": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "const": "error",
+            "title": "Event"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ErrorEventData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event",
+          "data"
+        ],
+        "title": "ErrorEvent"
+      },
+      "ErrorEventData": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorEventData"
       },
       "FeedbackOut": {
         "properties": {
@@ -2658,6 +3009,38 @@
           "next_cursor"
         ],
         "title": "JobPage"
+      },
+      "LegalHoldRequest": {
+        "properties": {
+          "legal_hold": {
+            "type": "boolean",
+            "title": "Legal Hold"
+          }
+        },
+        "type": "object",
+        "required": [
+          "legal_hold"
+        ],
+        "title": "LegalHoldRequest"
+      },
+      "LegalHoldResponse": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Document Id"
+          },
+          "legal_hold": {
+            "type": "boolean",
+            "title": "Legal Hold"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id",
+          "legal_hold"
+        ],
+        "title": "LegalHoldResponse"
       },
       "MeResponse": {
         "properties": {
@@ -2871,6 +3254,68 @@
         ],
         "title": "SearchResponse"
       },
+      "StatusEvent": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "const": "status",
+            "title": "Event"
+          },
+          "data": {
+            "$ref": "#/components/schemas/StatusEventData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event",
+          "data"
+        ],
+        "title": "StatusEvent"
+      },
+      "StatusEventData": {
+        "properties": {
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stage"
+        ],
+        "title": "StatusEventData"
+      },
+      "TokenEvent": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "const": "token",
+            "title": "Event"
+          },
+          "data": {
+            "$ref": "#/components/schemas/TokenEventData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event",
+          "data"
+        ],
+        "title": "TokenEvent"
+      },
+      "TokenEventData": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "TokenEventData"
+      },
       "UploadAccepted": {
         "properties": {
           "document_id": {
@@ -2901,6 +3346,57 @@
           "dispatch"
         ],
         "title": "UploadAccepted"
+      },
+      "UsageEvent": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "const": "usage",
+            "title": "Event"
+          },
+          "data": {
+            "$ref": "#/components/schemas/UsageEventData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event",
+          "data"
+        ],
+        "title": "UsageEvent"
+      },
+      "UsageEventData": {
+        "properties": {
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "cache_read_input_tokens": {
+            "type": "integer",
+            "title": "Cache Read Input Tokens"
+          },
+          "cost_usd": {
+            "type": "string",
+            "title": "Cost Usd"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "cache_read_input_tokens",
+          "cost_usd",
+          "model"
+        ],
+        "title": "UsageEventData"
       },
       "ValidationError": {
         "properties": {
@@ -2941,6 +3437,42 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VerdictEvent": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "const": "verdict",
+            "title": "Event"
+          },
+          "data": {
+            "$ref": "#/components/schemas/VerdictEventData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event",
+          "data"
+        ],
+        "title": "VerdictEvent"
+      },
+      "VerdictEventData": {
+        "properties": {
+          "groundedness": {
+            "type": "string",
+            "title": "Groundedness"
+          },
+          "citation_coverage": {
+            "type": "number",
+            "title": "Citation Coverage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "groundedness",
+          "citation_coverage"
+        ],
+        "title": "VerdictEventData"
       },
       "VersionOut": {
         "properties": {

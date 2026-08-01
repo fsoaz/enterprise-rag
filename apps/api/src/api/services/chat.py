@@ -340,6 +340,7 @@ async def run_chat(
 
     # Single emission point for the answer, reached only after the verdict is known.
     # `answer_text` is either the verified generation or the abstention message.
+    suspect_by_chunk = {c.chunk_id: c.is_suspect for c in chunks}
     for piece in _chunk_answer(answer_text):
         yield {"event": "token", "data": {"text": piece}}
     for cite in generation.citations:
@@ -354,6 +355,7 @@ async def run_chat(
                 "end_char": cite.end_char,
                 "document_title": cite.document_title,
                 "staleness": staleness.get(UUID(cite.document_version_id), "unknown"),
+                "is_suspect": bool(suspect_by_chunk.get(cite.chunk_id, False)),
             },
         }
 

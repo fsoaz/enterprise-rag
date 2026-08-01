@@ -232,3 +232,16 @@ async def create_acl_entry(
     await bump_acl_version(session, tenant_id=tenant_id)
     await session.flush()
     return entry
+
+
+async def delete_acl_entry(session: AsyncSession, *, tenant_id: UUID, entry_id: UUID) -> bool:
+    """Remove one ACL row and bump acl_versions. Returns False if missing."""
+    entry = await session.scalar(
+        select(AclEntry).where(AclEntry.id == entry_id, AclEntry.tenant_id == tenant_id)
+    )
+    if entry is None:
+        return False
+    await session.delete(entry)
+    await bump_acl_version(session, tenant_id=tenant_id)
+    await session.flush()
+    return True

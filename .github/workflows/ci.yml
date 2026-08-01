@@ -251,13 +251,70 @@ jobs:
     name: Container images
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build compose images
+      - name: Prepare env
+        run: cp .env.example .env
+
+      # Exercise compose interpolation (BUG-003) and prove REG-001's hardcoded
+      # bypass=false cannot be overridden by .env — build-push-action alone only
+      # checks a duplicated copy of the build-args in this workflow.
+      - name: Compose config is resolvable and bypass stays off
         run: |
+          set -euo pipefail
+          # Poison the env: if compose ever reverts to ${DEV_AUTH_BYPASS:-false}
+          # (or similar), resolved config would flip to true and this fails.
+          {
+            echo 'DEV_AUTH_BYPASS=true'
+            echo 'NEXT_PUBLIC_DEV_AUTH=true'
+          } >> .env
+          docker compose --env-file .env -f infra/compose/docker-compose.yml config > /tmp/resolved.yml
+          grep -q 'DEV_AUTH_BYPASS: "false"' /tmp/resolved.yml
+          grep -q 'NEXT_PUBLIC_DEV_AUTH: "false"' /tmp/resolved.yml
+          # api + worker both hardcode bypass off
+          test "$(grep -c 'DEV_AUTH_BYPASS: "false"' /tmp/resolved.yml)" -eq 2
+          # Restore clean .env for any later steps that might read it
           cp .env.example .env
-          docker compose --env-file .env -f infra/compose/docker-compose.yml build
+
+      # api and worker share Dockerfile.api — one build, two tags.
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/compose/Dockerfile.api
+          load: true
+          tags: |
+            enterprise-rag-api:latest
+            enterprise-rag-worker:latest
+          cache-from: type=gha,scope=dockerfile-api
+          cache-to: type=gha,mode=max,scope=dockerfile-api
+
+      - name: Build inference image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/compose/Dockerfile.inference
+          load: true
+          tags: enterprise-rag-inference:latest
+          cache-from: type=gha,scope=dockerfile-inference
+          cache-to: type=gha,mode=max,scope=dockerfile-inference
+
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/compose/Dockerfile.web
+          load: true
+          tags: enterprise-rag-web:latest
+          build-args: |
+            NEXT_PUBLIC_API_BASE=http://localhost:8000
+            NEXT_PUBLIC_DEV_AUTH=false
+          cache-from: type=gha,scope=dockerfile-web
+          cache-to: type=gha,mode=max,scope=dockerfile-web

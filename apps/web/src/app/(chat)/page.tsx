@@ -23,6 +23,7 @@ type CitationEvent = {
   end_char?: number;
   answer_sentence_idx?: number;
   staleness?: string;
+  is_suspect?: boolean;
 };
 
 type CompletedTurn = {
@@ -218,6 +219,7 @@ export default function ChatPage() {
           endChar: Number(c.end_char ?? 0),
           answerSentenceIdx: Number(c.answer_sentence_idx ?? 0),
           staleness: String(c.staleness ?? "unknown"),
+          isSuspect: Boolean(c.is_suspect),
         },
       ]);
     } else if (name === "status") {
@@ -474,6 +476,11 @@ export default function ChatPage() {
                     <span className="text-sm font-medium">
                       [{index + 1}] {c.documentTitle}
                     </span>
+                    {c.isSuspect ? (
+                      <span className="rounded border border-amber-600 px-2 py-0.5 text-xs text-amber-800 dark:border-amber-400 dark:text-amber-200">
+                        {t("unverifiedSource")}
+                      </span>
+                    ) : null}
                     <span
                       className={`rounded-full border px-2 py-0.5 text-xs ${
                         STALENESS_TONE[c.staleness] ?? STALENESS_TONE.unknown

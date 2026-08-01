@@ -13,6 +13,7 @@ type Document = {
   archived_at: string | null;
   created_at: string;
   current_version_id: string | null;
+  legal_hold?: boolean;
 };
 type Job = {
   id: string;
@@ -21,6 +22,15 @@ type Job = {
   error: string | null;
   attempts: number;
   created_at: string;
+};
+type AclEntry = {
+  id: string;
+  subject_type: string;
+  subject_id: string;
+  resource_type: string;
+  resource_id: string;
+  permission: string;
+  effect: string;
 };
 
 export default function AdminPage() {
@@ -41,6 +51,10 @@ export default function AdminPage() {
   const [busyDocumentId, setBusyDocumentId] = useState<string | null>(null);
   const [expandedDocumentId, setExpandedDocumentId] = useState<string | null>(null);
   const [jobsByDocument, setJobsByDocument] = useState<Record<string, Job[]>>({});
+  const [aclEntries, setAclEntries] = useState<AclEntry[] | null>(null);
+  const [busyAclId, setBusyAclId] = useState<string | null>(null);
+  // In OIDC mode try admin routes for everyone; 403 simply hides the panels.
+  const isAdmin = !DEV_AUTH || user === "acme-admin";
 
   // Collections are listed and chosen, never created blind. The old flow POSTed a
   // collection named "Default" whenever local state was empty, which tripped the
@@ -94,9 +108,33 @@ export default function AdminPage() {
     [locale, t, user],
   );
 
+  const loadAcl = useCallback(async () => {
+    if (!isAdmin) {
+      setAclEntries(null);
+      return;
+    }
+    try {
+      const response = await fetch(`${API_BASE}/api/v1/acl/entries?limit=50`, {
+        headers: { "Accept-Language": locale, ...authHeaders(user) },
+      });
+      if (response.status === 403) {
+        setAclEntries(null);
+        return;
+      }
+      if (!response.ok) {
+        setMessage(t("aclLoadFailed", { detail: await problemDetail(response) }));
+        return;
+      }
+      const body = (await response.json()) as { data: AclEntry[] };
+      setAclEntries(body.data);
+    } catch (err) {
+      setMessage(t("aclLoadFailed", { detail: String(err) }));
+    }
+  }, [isAdmin, locale, t, user]);
+
   useEffect(() => {
-    void Promise.all([loadCollections(), loadDocuments()]);
-  }, [loadCollections, loadDocuments]);
+    void Promise.all([loadCollections(), loadDocuments(), loadAcl()]);
+  }, [loadCollections, loadDocuments, loadAcl]);
 
   async function pollJob(documentId: string) {
     // Upload is accepted asynchronously; without polling the user never learns
@@ -202,6 +240,60 @@ export default function AdminPage() {
       setMessage(t("updateDocumentFailed", { detail: String(err) }));
     } finally {
       setBusyDocumentId(null);
+    }
+  }
+
+  async function changeLegalHold(document: Document) {
+    if (busyDocumentId || !isAdmin) return;
+    setBusyDocumentId(document.id);
+    setMessage(null);
+    const next = !document.legal_hold;
+    try {
+      const response = await fetch(`${API_BASE}/api/v1/admin/documents/${document.id}/legal-hold`, {
+        method: "POST",
+        headers: {
+          "Accept-Language": locale,
+          "Content-Type": "application/json",
+          ...authHeaders(user),
+        },
+        body: JSON.stringify({ legal_hold: next }),
+      });
+      if (!response.ok) {
+        setMessage(t("legalHoldFailed", { detail: await problemDetail(response) }));
+        return;
+      }
+      setDocuments((current) =>
+        current.map((item) => (item.id === document.id ? { ...item, legal_hold: next } : item)),
+      );
+      setMessage(t("legalHoldUpdated"));
+    } catch (err) {
+      setMessage(t("legalHoldFailed", { detail: String(err) }));
+    } finally {
+      setBusyDocumentId(null);
+    }
+  }
+
+  async function revokeAcl(entryId: string) {
+    if (busyAclId) return;
+    setBusyAclId(entryId);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/v1/acl/entries/${entryId}`, {
+        method: "DELETE",
+        headers: { "Accept-Language": locale, ...authHeaders(user) },
+      });
+      if (!response.ok) {
+        setMessage(t("aclRevokeFailed", { detail: await problemDetail(response) }));
+        return;
+      }
+      setAclEntries((current) =>
+        current ? current.filter((entry) => entry.id !== entryId) : current,
+      );
+      setMessage(t("aclRevoked"));
+    } catch (err) {
+      setMessage(t("aclRevokeFailed", { detail: String(err) }));
+    } finally {
+      setBusyAclId(null);
     }
   }
 
@@ -361,6 +453,11 @@ export default function AdminPage() {
                               {t("active")}
                             </span>
                           )}
+                          {document.legal_hold ? (
+                            <span className="rounded-full border border-rose-500/40 px-2 py-0.5 text-xs text-rose-700 dark:text-rose-300">
+                              {t("legalHold")}
+                            </span>
+                          ) : null}
                         </div>
                         <p className="mt-1 text-xs text-neutral-500">
                           {collectionNames.get(document.collection_id) ?? t("unknownCollection")} ·{" "}
@@ -370,7 +467,7 @@ export default function AdminPage() {
                           )}
                         </p>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
                           className="rounded border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700"
@@ -391,6 +488,16 @@ export default function AdminPage() {
                               ? t("restore")
                               : t("archive")}
                         </button>
+                        {isAdmin && aclEntries !== null ? (
+                          <button
+                            type="button"
+                            className="rounded border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-neutral-700"
+                            disabled={busyDocumentId === document.id}
+                            onClick={() => void changeLegalHold(document)}
+                          >
+                            {document.legal_hold ? t("legalHoldOff") : t("legalHoldOn")}
+                          </button>
+                        ) : null}
                       </div>
                     </div>
 
@@ -437,6 +544,46 @@ export default function AdminPage() {
             </button>
           ) : null}
         </section>
+
+        {aclEntries !== null ? (
+          <section aria-labelledby="acl-list-heading" className="flex flex-col gap-3">
+            <div>
+              <h2 id="acl-list-heading" className="text-xl font-semibold">
+                {t("aclGrants")}
+              </h2>
+              <p className="text-sm text-neutral-600 dark:text-neutral-400">
+                {t("aclDescription")}
+              </p>
+            </div>
+            {aclEntries.length === 0 ? (
+              <p className="rounded border border-dashed border-neutral-300 p-4 text-sm text-neutral-600 dark:border-neutral-700 dark:text-neutral-400">
+                {t("aclEmpty")}
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {aclEntries.map((entry) => (
+                  <li
+                    key={entry.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded border border-neutral-300 p-3 text-sm dark:border-neutral-700"
+                  >
+                    <span className="font-mono text-xs">
+                      {entry.effect} {entry.permission} · {entry.subject_type}/{entry.subject_id} ·{" "}
+                      {entry.resource_type}/{entry.resource_id}
+                    </span>
+                    <button
+                      type="button"
+                      className="rounded border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-neutral-700"
+                      disabled={busyAclId === entry.id}
+                      onClick={() => void revokeAcl(entry.id)}
+                    >
+                      {t("aclRevoke")}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        ) : null}
 
         <nav className="text-sm">
           <a className="underline" href="/">

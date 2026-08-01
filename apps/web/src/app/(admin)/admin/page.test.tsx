@@ -21,6 +21,9 @@ describe("AdminPage documents", () => {
       if (url.endsWith("/api/v1/collections")) {
         return Response.json({ data: [{ id: "collection-1", name: "Policies" }] });
       }
+      if (url.includes("/api/v1/acl/entries")) {
+        return Response.json({ data: [] });
+      }
       if (url.endsWith("/api/v1/documents?limit=100")) {
         return Response.json({ data: [document] });
       }

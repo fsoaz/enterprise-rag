@@ -14,7 +14,8 @@ from api.deps.auth import AclAdminUser
 from api.deps.db import get_db_session
 from api.pagination import apply_descending_cursor, page_limit, page_rows
 from db.models import AclEntry
-from retrieval.acl import create_acl_entry
+from domain.errors import NotFoundError
+from retrieval.acl import create_acl_entry, delete_acl_entry
 
 router = APIRouter(prefix="/acl", tags=["acl"])
 
@@ -122,3 +123,14 @@ async def list_acl_entries(
         ],
         next_cursor=next_cursor,
     )
+
+
+@router.delete("/entries/{entry_id}", status_code=204)
+async def delete_acl_entry_route(
+    entry_id: UUID,
+    user: AclAdminUser,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> None:
+    deleted = await delete_acl_entry(session, tenant_id=user.tenant_id, entry_id=entry_id)
+    if not deleted:
+        raise NotFoundError(f"No ACL entry {entry_id}")

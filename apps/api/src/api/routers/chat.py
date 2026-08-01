@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 from api.deps.auth import CurrentUser
 from api.deps.db import get_db_session
@@ -89,18 +89,133 @@ class QueryOut(BaseModel):
     citations: list[dict[str, object]]
 
 
+# --- Chat stream / JSON-batch event contract (BUG-007 OpenAPI half) ---
+
+
+class StatusEventData(BaseModel):
+    stage: str
+
+
+class TokenEventData(BaseModel):
+    text: str
+
+
+class CitationEventData(BaseModel):
+    answer_sentence_idx: int
+    chunk_id: str
+    document_version_id: str
+    cited_text: str
+    start_char: int
+    end_char: int
+    document_title: str
+    staleness: str
+    is_suspect: bool
+
+
+class UsageEventData(BaseModel):
+    input_tokens: int
+    output_tokens: int
+    cache_read_input_tokens: int
+    cost_usd: str
+    model: str
+
+
+class VerdictEventData(BaseModel):
+    groundedness: str
+    citation_coverage: float
+
+
+class DoneEventData(BaseModel):
+    query_id: str
+
+
+class ErrorEventData(BaseModel):
+    detail: str
+
+
+class StatusEvent(BaseModel):
+    event: Literal["status"]
+    data: StatusEventData
+
+
+class TokenEvent(BaseModel):
+    event: Literal["token"]
+    data: TokenEventData
+
+
+class CitationEvent(BaseModel):
+    event: Literal["citation"]
+    data: CitationEventData
+
+
+class UsageEvent(BaseModel):
+    event: Literal["usage"]
+    data: UsageEventData
+
+
+class VerdictEvent(BaseModel):
+    event: Literal["verdict"]
+    data: VerdictEventData
+
+
+class DoneEvent(BaseModel):
+    event: Literal["done"]
+    data: DoneEventData
+
+
+class ErrorEvent(BaseModel):
+    event: Literal["error"]
+    data: ErrorEventData
+
+
+ChatStreamEvent = Annotated[
+    StatusEvent | TokenEvent | CitationEvent | UsageEvent | VerdictEvent | DoneEvent | ErrorEvent,
+    Field(discriminator="event"),
+]
+
+
+class ChatCompletionsJsonResponse(BaseModel):
+    """Body when ``stream: false`` — same events as the SSE stream, batched."""
+
+    events: list[ChatStreamEvent]
+
+
 def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-@router.post("/chat/completions")
+@router.post(
+    "/chat/completions",
+    response_model=None,
+    responses={
+        200: {
+            "description": (
+                "When stream=false: JSON batch of the same events. "
+                "When stream=true: SSE frames (`event:` + `data:` JSON)."
+            ),
+            "model": ChatCompletionsJsonResponse,
+            "content": {
+                "text/event-stream": {
+                    "schema": {
+                        "type": "string",
+                        "description": (
+                            "SSE stream. Each frame: event: <name>\\ndata: <json>\\n\\n. "
+                            "Event names and data shapes match ChatStreamEvent "
+                            "(status, token, citation, usage, verdict, done, error)."
+                        ),
+                    }
+                }
+            },
+        }
+    },
+)
 async def chat_completions(
     body: ChatRequest,
     user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     settings: Annotated[Settings, Depends(get_settings)],
     response: Response,
-) -> StreamingResponse:
+) -> StreamingResponse | JSONResponse:
     # After body validation so malformed payloads (422) do not consume quota.
     await enforce_rate_limit(
         user,
@@ -137,6 +252,22 @@ async def chat_completions(
             retrieval_result=retrieval,
         ):
             yield _sse(evt["event"], evt["data"])
+
+    if not body.stream:
+        events: list[dict[str, Any]] = []
+        async for evt in run_chat(
+            session,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            question=question,
+            conversation_history=history,
+            strategy=RetrievalStrategy(body.strategy),
+            anthropic_api_key=settings.anthropic_api_key,
+            stream=False,
+            retrieval_result=retrieval,
+        ):
+            events.append({"event": evt["event"], "data": evt["data"]})
+        return JSONResponse({"events": events}, headers=dict(response.headers))
 
     return StreamingResponse(
         event_stream(), media_type="text/event-stream", headers=dict(response.headers)

@@ -47,6 +47,15 @@ class EraseResponse(BaseModel):
     objects_failed: int
 
 
+class LegalHoldRequest(BaseModel):
+    legal_hold: bool
+
+
+class LegalHoldResponse(BaseModel):
+    document_id: UUID
+    legal_hold: bool
+
+
 class ErasureOut(BaseModel):
     id: UUID
     document_id: UUID
@@ -271,3 +280,26 @@ async def erase_document(
         objects_deleted=objects_deleted,
         objects_failed=len(failed_storage_keys),
     )
+
+
+@router.post("/documents/{document_id}/legal-hold", response_model=LegalHoldResponse)
+async def set_legal_hold(
+    document_id: UUID,
+    body: LegalHoldRequest,
+    user: AclAdminUser,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> LegalHoldResponse:
+    """Place or lift a legal hold so erasure can be blocked or re-enabled."""
+    doc = await session.scalar(
+        select(Document).where(
+            Document.id == document_id,
+            Document.tenant_id == user.tenant_id,
+        )
+    )
+    if doc is None:
+        raise NotFoundError(f"No document {document_id}")
+    if doc.erased_at is not None:
+        raise ConflictError(f"Document {document_id} is already erased")
+    doc.legal_hold = body.legal_hold
+    await session.flush()
+    return LegalHoldResponse(document_id=document_id, legal_hold=doc.legal_hold)

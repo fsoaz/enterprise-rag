@@ -16,8 +16,8 @@ from api.deps.db import get_db_session
 from api.pagination import apply_descending_cursor, page_limit, page_rows
 from db.models import Collection
 from domain.errors import ConflictError, NotFoundError
-from domain.types import AclPermission
-from retrieval.acl import resolve_acl
+from domain.types import AclEffect, AclPermission, AclResourceType, AclSubjectType
+from retrieval.acl import create_acl_entry, resolve_acl
 
 router = APIRouter(prefix="/collections", tags=["collections"])
 
@@ -61,6 +61,19 @@ async def create_collection(
         # creates-if-missing hits it on its second run.
         await session.rollback()
         raise ConflictError(f"A collection named {body.name!r} already exists") from exc
+    # Creator must be able to see and upload into the collection they just made.
+    subject_id = str(user.user_id)
+    for permission in (AclPermission.READ, AclPermission.WRITE):
+        await create_acl_entry(
+            session,
+            tenant_id=user.tenant_id,
+            subject_type=AclSubjectType.USER.value,
+            subject_id=subject_id,
+            resource_type=AclResourceType.COLLECTION.value,
+            resource_id=collection.id,
+            permission=permission.value,
+            effect=AclEffect.ALLOW.value,
+        )
     return CollectionOut(
         id=collection.id,
         name=collection.name,

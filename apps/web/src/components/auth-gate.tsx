@@ -15,6 +15,27 @@ type Session =
   | { status: "anonymous"; error?: string }
   | { status: "authenticated"; user: SessionUser };
 
+const AUTH_ERROR_KEYS = {
+  provider_denied: "authErrorProviderDenied",
+  state_mismatch: "authErrorStateMismatch",
+  unauthorized: "authErrorUnauthorized",
+  exchange_failed: "authErrorExchangeFailed",
+} as const;
+
+type AuthErrorCode = keyof typeof AUTH_ERROR_KEYS;
+
+function resolveAuthError(
+  code: string | null,
+  t: (key: (typeof AUTH_ERROR_KEYS)[AuthErrorCode] | "authErrorGeneric") => string,
+): string | undefined {
+  if (!code) return undefined;
+  if (Object.hasOwn(AUTH_ERROR_KEYS, code)) {
+    return t(AUTH_ERROR_KEYS[code as AuthErrorCode]);
+  }
+  // Unknown / attacker-controlled text → generic message only.
+  return t("authErrorGeneric");
+}
+
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const { t } = useLocale();
   const [session, setSession] = useState<Session>(
@@ -28,7 +49,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     let active = true;
     const authError = new URLSearchParams(window.location.search).get("auth_error");
     if (authError) {
-      setSession({ status: "anonymous", error: authError });
+      setSession({ status: "anonymous", error: resolveAuthError(authError, t) });
       return;
     }
     fetch("/api/auth/session", { cache: "no-store" })
