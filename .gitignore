@@ -27,7 +27,6 @@ apps/web/out/
 .vscode/
 .DS_Store
 *.swp
-docs/
 
 # uv
 uv.lock.bak
