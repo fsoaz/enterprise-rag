@@ -339,7 +339,11 @@ export default function ChatPage() {
         </form>
 
         {status ? (
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+          <p
+            className="text-sm text-neutral-500 dark:text-neutral-400"
+            aria-live="polite"
+            aria-atomic="true"
+          >
             {status === "retrieving"
               ? t("retrieving")
               : status === "verifying"

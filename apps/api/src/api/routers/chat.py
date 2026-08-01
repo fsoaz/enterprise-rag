@@ -13,7 +13,7 @@ from starlette.responses import StreamingResponse
 
 from api.deps.auth import CurrentUser
 from api.deps.db import get_db_session
-from api.deps.limits import ChatRateLimited, assert_within_budget
+from api.deps.limits import assert_within_budget, enforce_rate_limit
 from api.services.chat import run_chat
 from api.settings import Settings, get_settings
 from db.models import Query, QueryCitation
@@ -96,11 +96,19 @@ def _sse(event: str, data: dict[str, Any]) -> str:
 @router.post("/chat/completions")
 async def chat_completions(
     body: ChatRequest,
-    user: ChatRateLimited,
+    user: CurrentUser,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     settings: Annotated[Settings, Depends(get_settings)],
     response: Response,
 ) -> StreamingResponse:
+    # After body validation so malformed payloads (422) do not consume quota.
+    await enforce_rate_limit(
+        user,
+        settings,
+        response,
+        scope="chat",
+        limit_attr="chat_rate_limit_per_minute",
+    )
     question = body.resolved_question()
     history = body.conversation_history()
     # Checked before the stream opens so an over-budget tenant gets a 429 rather

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Annotated, Any
@@ -20,6 +21,8 @@ from api.settings import Settings, get_settings
 from db.models import Group, RoleAssignment, User, UserGroup
 from domain.errors import PermissionDeniedError
 from domain.types import Role
+
+logger = logging.getLogger(__name__)
 
 _jwks_client: PyJWKClient | None = None
 _identity_engine: AsyncEngine | None = None
@@ -192,6 +195,20 @@ async def _auth_from_oidc_claims(claims: dict[str, Any], settings: Settings) -> 
             )
         )
         if user is None or user.status != "active":
+            by_subject = await session.scalar(
+                select(User).where(User.external_subject == subject).limit(1)
+            )
+            if by_subject is not None and by_subject.tenant_id != tenant_id:
+                logger.warning(
+                    "OIDC tenant_id mismatch for subject=%s claim_tenant=%s db_tenant=%s",
+                    subject,
+                    tenant_id,
+                    by_subject.tenant_id,
+                )
+            elif by_subject is None:
+                logger.info("OIDC subject unknown: %s", subject)
+            elif by_subject.status != "active":
+                logger.info("OIDC subject inactive: %s", subject)
             raise _unauthorized("Unknown or inactive user")
         # Authorization comes from the database, not the token. The roles/groups
         # claims are required (so a malformed token is rejected early) but are not

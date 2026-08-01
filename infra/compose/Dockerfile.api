@@ -15,9 +15,9 @@ COPY packages/ packages/
 COPY apps/api/ apps/api/
 COPY apps/worker/ apps/worker/
 
-RUN uv sync --frozen --no-dev \
-    --package enterprise-rag-api \
-    --package enterprise-rag-worker
+# uv 0.6.14 accepts --package only once; second sync keeps the first package.
+RUN uv sync --frozen --no-dev --package enterprise-rag-api && \
+    uv sync --frozen --no-dev --inexact --package enterprise-rag-worker
 
 WORKDIR /app
 ENV PYTHONPATH=/app/apps/api/src:/app/apps/worker/src:/app/packages/domain/src:/app/packages/db/src:/app/packages/retrieval/src:/app/packages/llm/src:/app/packages/observability/src

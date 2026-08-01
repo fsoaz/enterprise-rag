@@ -81,6 +81,53 @@ async def _hit(
         return False, 0, 0
 
 
+async def enforce_rate_limit(
+    user: AuthUser,
+    settings: Settings,
+    response: Response,
+    *,
+    scope: str,
+    limit_attr: str = "rate_limit_per_minute",
+    window_seconds: int = 60,
+) -> None:
+    """Count one request against the user's window; raise 429 when over.
+
+    Call from inside a route handler (after body validation) when invalid
+    payloads must not consume quota. Dependency-injected ``rate_limit`` still
+    runs before body parsing and will bill 422s.
+    """
+    limit = int(getattr(settings, limit_attr))
+    if limit <= 0:
+        return
+    over, used, reset = await _hit(
+        f"{scope}:{user.tenant_id}:{user.user_id}",
+        limit=limit,
+        window_seconds=window_seconds,
+        settings=settings,
+    )
+    if reset:
+        remaining = max(0, limit - used)
+        response.headers.update(
+            {
+                "RateLimit-Limit": str(limit),
+                "RateLimit-Remaining": str(remaining),
+                "RateLimit-Reset": str(reset),
+            }
+        )
+    if over:
+        retry_after = max(1, reset - int(time.time()))
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded for {scope}: {limit} requests per {window_seconds}s.",
+            headers={
+                "Retry-After": str(retry_after),
+                "RateLimit-Limit": str(limit),
+                "RateLimit-Remaining": "0",
+                "RateLimit-Reset": str(reset),
+            },
+        )
+
+
 def rate_limit(
     scope: str, *, limit_attr: str = "rate_limit_per_minute", window_seconds: int = 60
 ) -> Callable[..., Coroutine[Any, Any, AuthUser]]:
@@ -91,36 +138,14 @@ def rate_limit(
         settings: Annotated[Settings, Depends(get_settings)],
         response: Response,
     ) -> AuthUser:
-        limit = int(getattr(settings, limit_attr))
-        if limit <= 0:
-            return user
-        over, used, reset = await _hit(
-            f"{scope}:{user.tenant_id}:{user.user_id}",
-            limit=limit,
+        await enforce_rate_limit(
+            user,
+            settings,
+            response,
+            scope=scope,
+            limit_attr=limit_attr,
             window_seconds=window_seconds,
-            settings=settings,
         )
-        if reset:
-            remaining = max(0, limit - used)
-            response.headers.update(
-                {
-                    "RateLimit-Limit": str(limit),
-                    "RateLimit-Remaining": str(remaining),
-                    "RateLimit-Reset": str(reset),
-                }
-            )
-        if over:
-            retry_after = max(1, reset - int(time.time()))
-            raise HTTPException(
-                status_code=429,
-                detail=f"Rate limit exceeded for {scope}: {limit} requests per {window_seconds}s.",
-                headers={
-                    "Retry-After": str(retry_after),
-                    "RateLimit-Limit": str(limit),
-                    "RateLimit-Remaining": "0",
-                    "RateLimit-Reset": str(reset),
-                },
-            )
         return user
 
     return _checker
@@ -151,9 +176,6 @@ async def assert_within_budget(
         )
 
 
-ChatRateLimited = Annotated[
-    AuthUser, Depends(rate_limit("chat", limit_attr="chat_rate_limit_per_minute"))
-]
 SearchRateLimited = Annotated[AuthUser, Depends(rate_limit("search"))]
 UploadRateLimited = Annotated[
     AuthUser, Depends(rate_limit("upload", limit_attr="upload_rate_limit_per_minute"))

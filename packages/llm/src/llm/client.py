@@ -16,7 +16,12 @@ from anthropic import (
 )
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
-from llm.models import FALLBACK_MODEL, JUDGE_MODEL, PRIMARY_MODEL, ModelRegistry
+from llm.models import (
+    EXTRACTIVE_FALLBACK_MODEL,
+    JUDGE_MODEL,
+    PRIMARY_MODEL,
+    ModelRegistry,
+)
 
 # Only transient failures are worth retrying. A 400 (bad request shape, oversized
 # prompt) is deterministic — retrying it burns latency and quota for the same error.
@@ -484,27 +489,40 @@ def extractive_fallback(
     """Degraded mode when generation is unavailable — return top passages."""
     parts = [f"[{c.document_title}]\n{c.body}" for c in chunks[:3]]
     text = f"{introduction}\n\n" + "\n\n---\n\n".join(parts)
-    citations = [
-        CitationSpan(
-            chunk_id=c.chunk_id,
-            document_version_id=c.document_version_id,
-            document_title=c.document_title,
-            cited_text=c.body[:200],
-            start_char=0,
-            end_char=min(200, len(c.body)),
-            # This fallback lists source passages; it does not generate claims
-            # with sentence-level support.
-            answer_sentence_idx=-1,
+    citations = []
+    for c in chunks[:3]:
+        cited_text, end_char = _truncate_cited_text(c.body)
+        citations.append(
+            CitationSpan(
+                chunk_id=c.chunk_id,
+                document_version_id=c.document_version_id,
+                document_title=c.document_title,
+                cited_text=cited_text,
+                start_char=0,
+                end_char=end_char,
+                # This fallback lists source passages; it does not generate claims
+                # with sentence-level support.
+                answer_sentence_idx=-1,
+            )
         )
-        for i, c in enumerate(chunks[:3])
-    ]
     return GenerationResult(
         answer_text=text,
         citations=citations,
-        model=FALLBACK_MODEL,
+        model=EXTRACTIVE_FALLBACK_MODEL,
         input_tokens=0,
         output_tokens=0,
         cache_read_input_tokens=0,
         stop_reason="extractive_fallback",
         cost_usd=Decimal("0"),
     )
+
+
+def _truncate_cited_text(body: str, limit: int = 200) -> tuple[str, int]:
+    """Truncate on a word boundary and append an ellipsis when truncated."""
+    if len(body) <= limit:
+        return body, len(body)
+    window = body[:limit]
+    space = window.rfind(" ")
+    end = space if space > limit // 2 else limit
+    span = body[:end].rstrip()
+    return f"{span}…", len(span)

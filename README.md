@@ -14,7 +14,7 @@
 
 Employees waste hours searching policies, contracts, technical documentation, and internal procedures. Conventional search returns documents; people need answers — with the source attached, so the answer can be trusted and audited.
 
-This system answers questions in Portuguese or English, grounded in an organization's own documents, with a citation on every claim pointing at the exact span in the exact document version it came from. It respects per-document permissions *at retrieval time*, detects when documents are going stale, refuses to answer when the corpus does not support one, and reports its own quality and cost on a dashboard.
+This system answers questions in Portuguese or English, grounded in an organization's own documents, with a citation on every claim pointing at the exact span in the exact document version it came from. It respects per-document permissions *at retrieval time*, detects when documents are going stale, and refuses to answer when the corpus does not support one.
 
 ## Stack
 

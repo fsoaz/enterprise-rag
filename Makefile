@@ -2,7 +2,11 @@
 
 # Throwaway database for migrate-check. Never the dev database.
 MIGRATE_CHECK_DB ?= rag_migrate_check
-PSQL = docker compose -f infra/compose/docker-compose.yml exec -T -e PGPASSWORD=postgres postgres psql -U postgres
+# Compose's project directory is infra/compose/, so root .env is invisible for
+# ${VAR} interpolation (publish ports) unless we pass it explicitly. Auth bypass
+# is hardcoded false in compose and is not taken from this file.
+COMPOSE = docker compose --env-file $(CURDIR)/.env -f infra/compose/docker-compose.yml
+PSQL = $(COMPOSE) exec -T -e PGPASSWORD=postgres postgres psql -U postgres
 
 install:
 	uv sync --all-packages --group dev
@@ -33,15 +37,16 @@ test-integration:
 
 up:
 	@if [ ! -f .env ]; then cp .env.example .env && echo "Created .env from .env.example — edit secrets as needed."; fi
-	docker compose -f infra/compose/docker-compose.yml up -d --build postgres redis minio minio-init keycloak
+	$(COMPOSE) up -d --build postgres redis minio minio-init keycloak
 	@echo "Waiting for Postgres..."
-	@until docker compose -f infra/compose/docker-compose.yml exec -T postgres pg_isready -U postgres -d enterprise_rag >/dev/null 2>&1; do sleep 1; done
+	@until $(COMPOSE) exec -T postgres pg_isready -U postgres -d enterprise_rag >/dev/null 2>&1; do sleep 1; done
 	$(MAKE) migrate
 	$(MAKE) seed
-	docker compose -f infra/compose/docker-compose.yml up -d --build api worker inference web
+	$(COMPOSE) up -d --build api worker inference web
 
 down:
-	docker compose -f infra/compose/docker-compose.yml down
+	@if [ ! -f .env ]; then cp .env.example .env; fi
+	$(COMPOSE) down
 
 migrate:
 	set -a && [ -f .env ] && . ./.env; set +a; \

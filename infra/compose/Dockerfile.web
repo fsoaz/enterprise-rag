@@ -4,6 +4,8 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 COPY apps/web/package.json apps/web/package-lock.json ./
 RUN npm ci
+# node_modules / .next are excluded by the root .dockerignore so this COPY
+# does not replace the clean install above with the host tree.
 COPY apps/web/ ./
 ARG NEXT_PUBLIC_API_BASE=http://localhost:8000
 ARG NEXT_PUBLIC_DEV_AUTH=false

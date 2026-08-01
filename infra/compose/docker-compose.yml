@@ -1,15 +1,15 @@
 # Every published port binds to ${BIND_ADDR}, which defaults to loopback.
 # These services run with development credentials (default Postgres/MinIO/Keycloak
-# passwords, no Redis auth) and the API runs with DEV_AUTH_BYPASS=true, so exposing
-# them on 0.0.0.0 hands any host on the network full read/write access to every
-# tenant. Override BIND_ADDR only for an isolated network you control.
+# passwords, no Redis auth). Exposing them on 0.0.0.0 hands any host on the
+# network full read/write access to every tenant. Override BIND_ADDR only for
+# an isolated network you control.
 name: enterprise-rag
 
 services:
   postgres:
     image: pgvector/pgvector:pg16
     ports:
-      - "${BIND_ADDR:-127.0.0.1}:${POSTGRES_PUBLISH_PORT:-5432}:5432"
+      - "${BIND_ADDR:-127.0.0.1}:${POSTGRES_PUBLISH_PORT:-15432}:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -26,7 +26,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "${BIND_ADDR:-127.0.0.1}:${REDIS_PUBLISH_PORT:-6379}:6379"
+      - "${BIND_ADDR:-127.0.0.1}:${REDIS_PUBLISH_PORT:-16379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -37,8 +37,8 @@ services:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     ports:
-      - "${BIND_ADDR:-127.0.0.1}:${MINIO_API_PUBLISH_PORT:-9000}:9000"
-      - "${BIND_ADDR:-127.0.0.1}:${MINIO_CONSOLE_PUBLISH_PORT:-9001}:9001"
+      - "${BIND_ADDR:-127.0.0.1}:${MINIO_API_PUBLISH_PORT:-19000}:9000"
+      - "${BIND_ADDR:-127.0.0.1}:${MINIO_CONSOLE_PUBLISH_PORT:-19001}:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -99,8 +99,9 @@ services:
       INFERENCE_SERVICE_TOKEN: dev-inference-token
       OIDC_ISSUER: http://localhost:8080/realms/enterprise-rag
       OIDC_JWKS_URL: http://keycloak:8080/realms/enterprise-rag/protocol/openid-connect/certs
-      # Explicit opt-in escape hatch. The default Compose path exercises real OIDC.
-      DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-false}
+      # Hardcoded off: root .env must not silently enable impersonation via
+      # --env-file / env_file. Use local uvicorn + apps/web/.env.local for bypass.
+      DEV_AUTH_BYPASS: "false"
     depends_on:
       postgres:
         condition: service_healthy
@@ -128,6 +129,7 @@ services:
       S3_ENDPOINT_URL: http://minio:9000
       INFERENCE_BASE_URL: http://inference:8001
       INFERENCE_SERVICE_TOKEN: dev-inference-token
+      DEV_AUTH_BYPASS: "false"
     depends_on:
       postgres:
         condition: service_healthy
@@ -170,7 +172,7 @@ services:
       # running container, where the already-compiled bundle never reads it.
       args:
         NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
-        NEXT_PUBLIC_DEV_AUTH: ${DEV_AUTH_BYPASS:-false}
+        NEXT_PUBLIC_DEV_AUTH: "false"
     environment:
       API_BASE_URL: http://api:8000
       APP_BASE_URL: http://localhost:3000

@@ -1,0 +1,24 @@
+# Compose build contexts are the repository root (infra/compose/Dockerfile.*).
+.git
+.venv
+venv
+**/node_modules
+**/.next
+**/out
+**/__pycache__
+**/*.py[cod]
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache
+**/.import_linter_cache
+.coverage
+htmlcov
+docs
+.env
+.env.*
+!.env.example
+.idea
+.vscode
+.DS_Store
+*.swp
+uv.lock.bak

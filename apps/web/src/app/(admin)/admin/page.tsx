@@ -31,6 +31,7 @@ export default function AdminPage() {
   const [documentsCursor, setDocumentsCursor] = useState<string | null>(null);
   const [loadingDocuments, setLoadingDocuments] = useState(false);
   const loadingDocumentsRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [collectionId, setCollectionId] = useState("");
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -145,6 +146,9 @@ export default function AdminPage() {
       setMessage(t("uploadAccepted"));
       setTitle("");
       setFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
       await loadDocuments();
       await pollJob(body.document_id);
       await loadDocuments();
@@ -269,6 +273,7 @@ export default function AdminPage() {
           </label>
           <input
             id="file"
+            ref={fileInputRef}
             type="file"
             accept=".pdf,.md,.txt,text/plain,application/pdf,text/markdown"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}

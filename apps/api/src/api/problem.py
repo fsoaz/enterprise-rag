@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -97,7 +97,12 @@ def domain_error_response(request: Request, exc: DomainError) -> JSONResponse:
 
 
 async def attach_request_id(request: Request, call_next: Any) -> Response:
-    request_id = request.headers.get("X-Request-Id") or str(uuid4())
+    raw = request.headers.get("X-Request-Id")
+    try:
+        # Accept only a real UUID; otherwise mint one so callers cannot poison logs.
+        request_id = str(UUID(raw)) if raw else str(uuid4())
+    except (ValueError, TypeError):
+        request_id = str(uuid4())
     request.state.request_id = request_id
     response: Response = await call_next(request)
     response.headers["X-Request-Id"] = request_id

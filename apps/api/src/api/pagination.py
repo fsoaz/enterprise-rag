@@ -91,5 +91,10 @@ def page_rows[T](
 
 
 def page_limit(value: int) -> int:
-    """Preserve the prior clamping behavior for existing limit callers."""
-    return min(max(value, 1), 200)
+    """Bound a page size. Reject non-positive values; clamp the upper end at 200."""
+    if value < 1:
+        raise ValidationError(
+            "Invalid page limit",
+            errors=[{"field": "limit", "message": "limit must be at least 1"}],
+        )
+    return min(value, 200)

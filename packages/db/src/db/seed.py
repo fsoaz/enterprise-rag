@@ -138,6 +138,31 @@ TENANT_IDS: dict[str, UUID] = {
     for spec in SEEDS
 }
 
+# Same set as packages/db/migrations/versions/0001_initial.py — keep in sync.
+TENANT_SCOPED_TABLES: tuple[str, ...] = (
+    "users",
+    "groups",
+    "user_groups",
+    "roles",
+    "collections",
+    "documents",
+    "document_versions",
+    "chunks",
+    "chunk_embeddings",
+    "acl_entries",
+    "acl_versions",
+    "queries",
+    "query_citations",
+    "feedback",
+    "ingestion_jobs",
+    "cost_ledger",
+    "erasure_log",
+    "eval_datasets",
+    "eval_items",
+    "eval_runs",
+    "eval_results",
+)
+
 
 def _async_url() -> str:
     url = os.environ.get("DATABASE_URL_MIGRATE") or os.environ.get("DATABASE_URL")
@@ -151,14 +176,68 @@ def _async_url() -> str:
     return url
 
 
+async def _remap_tenant_id(session: AsyncSession, *, old_id: UUID, new_id: UUID, slug: str) -> None:
+    """Move a tenant primary key to the expected uuid5 without dropping child rows.
+
+    FKs are ON DELETE CASCADE only, so the PK cannot be updated in place. Insert the
+    target id, retarget every tenant-scoped table, then delete the old row.
+    """
+    if old_id == new_id:
+        return
+
+    collision = await session.scalar(select(Tenant).where(Tenant.id == new_id))
+    if collision is not None:
+        msg = (
+            f"Cannot remap tenant {slug!r}: target id {new_id} already exists "
+            f"as slug {collision.slug!r}"
+        )
+        raise RuntimeError(msg)
+
+    old = await session.scalar(select(Tenant).where(Tenant.id == old_id))
+    if old is None:
+        msg = f"Cannot remap tenant {slug!r}: source id {old_id} is missing"
+        raise RuntimeError(msg)
+
+    temp_slug = f"{slug}__rekey"
+    await session.execute(
+        text("UPDATE tenants SET slug = :temp WHERE id = :old"),
+        {"temp": temp_slug, "old": old_id},
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO tenants (id, slug, name, status, settings, created_at, updated_at)
+            SELECT :new, :slug, name, status, settings, created_at, updated_at
+            FROM tenants WHERE id = :old
+            """
+        ),
+        {"new": new_id, "slug": slug, "old": old_id},
+    )
+    for table in TENANT_SCOPED_TABLES:
+        await session.execute(
+            text(f"UPDATE {table} SET tenant_id = :new WHERE tenant_id = :old"),
+            {"new": new_id, "old": old_id},
+        )
+    await session.execute(text("DELETE FROM tenants WHERE id = :old"), {"old": old_id})
+    await session.flush()
+    session.expire_all()
+
+
 async def seed_tenant(session: AsyncSession, spec: TenantSeed) -> UUID:
+    expected = TENANT_IDS[spec.slug]
     existing = await session.scalar(select(Tenant).where(Tenant.slug == spec.slug))
     if existing is not None:
+        old_id = existing.id
+        tenant_id = old_id
+        if old_id != expected:
+            await _remap_tenant_id(session, old_id=old_id, new_id=expected, slug=spec.slug)
+            print(f"remapped tenant {spec.slug} {old_id} → {expected}")
+            tenant_id = expected
         # Idempotent: ensure collection + ACL exist for already-seeded tenants.
-        await _ensure_collection_acl(session, existing.id, spec)
-        return existing.id
+        await _ensure_collection_acl(session, tenant_id, spec)
+        return tenant_id
 
-    tenant_id = TENANT_IDS[spec.slug]
+    tenant_id = expected
     session.add(
         Tenant(
             id=tenant_id,

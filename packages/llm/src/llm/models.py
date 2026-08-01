@@ -14,6 +14,8 @@ class ModelSpec:
 PRIMARY_MODEL = "claude-opus-5"
 FALLBACK_MODEL = "claude-sonnet-5"
 JUDGE_MODEL = "claude-haiku-4-5"
+# Sentinel for the no-LLM extractive path — never a billable Anthropic model id.
+EXTRACTIVE_FALLBACK_MODEL = "extractive-fallback"
 
 
 class ModelRegistry:
@@ -21,6 +23,8 @@ class ModelRegistry:
 
     _specs: ClassVar[dict[str, ModelSpec]] = {
         PRIMARY_MODEL: ModelSpec(PRIMARY_MODEL, 5.0, 25.0),
+        # Anthropic intro pricing is $2/$10 per MTok through 2026-08-31; we keep
+        # the post-intro $3/$15 list rate so the ledger is stable (not auto-dated).
         FALLBACK_MODEL: ModelSpec(FALLBACK_MODEL, 3.0, 15.0),
         JUDGE_MODEL: ModelSpec(JUDGE_MODEL, 1.0, 5.0),
     }
