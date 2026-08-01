@@ -358,7 +358,7 @@ pre-release: eval-full → adversarial → load
 | --- | --- | --- | --- |
 | lint | `lint` | Yes | `ruff check`, `ruff format --check`, `biome check` |
 | typecheck | `typecheck` | Yes | `mypy`, `import-linter`, `tsc`, `next build` |
-| contract | `typecheck` | Yes | `make openapi-check`, and `generate:api-types` followed by `git diff --exit-code` on `src/lib/generated/api.ts` |
+| contract | `typecheck` | Yes | `make openapi-check`, then `cd apps/web && npm ci && npm run generate:api-types` followed by `git diff --exit-code src/lib/generated/api.ts` |
 | unit | `unit` | Yes | `pytest -m 'not integration'` |
 | **frontend** | `web-test` | Yes | `vitest run --coverage` |
 | integration | `integration-db` | Yes | Postgres + Redis services, `enterprise_rag_test`, plus a real `inference` process on `INFERENCE_BACKEND=stub` |

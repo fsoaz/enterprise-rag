@@ -37,6 +37,17 @@ No compatibility shims for older runtimes. If a dependency requires an older Pyt
 
 **`src/lib/generated/` is output, not source.** Edit `openapi.json` upstream and regenerate; CI runs the generator and fails on any diff, so a hand-edit is reverted by the next run rather than surviving as an untracked local behavior.
 
+After an OpenAPI change, regenerate the frontend types using the lockfile-pinned toolchain, then commit the output:
+
+```bash
+cd apps/web
+npm ci
+npm run generate:api-types
+git diff --exit-code src/lib/generated/api.ts
+```
+
+Use `npm ci`, not `npm install`: CI resolves `openapi-typescript` from `package-lock.json`, and a different generator version can produce a spurious generated-file diff. Commit `src/lib/generated/api.ts` when the command changes it.
+
 ## 3. Repository Layout
 
 Canonical layout is in [architecture.md § 16](../context/architecture.md#16-repository-layout). Two rules that matter more than the rest:
