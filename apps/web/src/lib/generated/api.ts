@@ -240,6 +240,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/acl/entries/{entry_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Delete Acl Entry Route */
+    delete: operations["delete_acl_entry_route_api_v1_acl_entries__entry_id__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/chat/completions": {
     parameters: {
       query?: never;
@@ -328,6 +345,26 @@ export interface paths {
      *     and so the erasure itself stays auditable.
      */
     post: operations["erase_document_api_v1_admin_documents__document_id__erase_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/documents/{document_id}/legal-hold": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Set Legal Hold
+     * @description Place or lift a legal hold so erasure can be blocked or re-enabled.
+     */
+    post: operations["set_legal_hold_api_v1_admin_documents__document_id__legal_hold_post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -436,6 +473,22 @@ export interface components {
        */
       language: string;
     };
+    /**
+     * ChatCompletionsJsonResponse
+     * @description Body when ``stream: false`` — same events as the SSE stream, batched.
+     */
+    ChatCompletionsJsonResponse: {
+      /** Events */
+      events: (
+        | components["schemas"]["StatusEvent"]
+        | components["schemas"]["TokenEvent"]
+        | components["schemas"]["CitationEvent"]
+        | components["schemas"]["UsageEvent"]
+        | components["schemas"]["VerdictEvent"]
+        | components["schemas"]["DoneEvent"]
+        | components["schemas"]["ErrorEvent"]
+      )[];
+    };
     /** ChatMessage */
     ChatMessage: {
       /**
@@ -463,6 +516,36 @@ export interface components {
        * @enum {string}
        */
       strategy: "dense_only" | "lexical_only" | "hybrid_rrf" | "hybrid_rerank";
+    };
+    /** CitationEvent */
+    CitationEvent: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "citation";
+      data: components["schemas"]["CitationEventData"];
+    };
+    /** CitationEventData */
+    CitationEventData: {
+      /** Answer Sentence Idx */
+      answer_sentence_idx: number;
+      /** Chunk Id */
+      chunk_id: string;
+      /** Document Version Id */
+      document_version_id: string;
+      /** Cited Text */
+      cited_text: string;
+      /** Start Char */
+      start_char: number;
+      /** End Char */
+      end_char: number;
+      /** Document Title */
+      document_title: string;
+      /** Staleness */
+      staleness: string;
+      /** Is Suspect */
+      is_suspect: boolean;
     };
     /** CollectionCreate */
     CollectionCreate: {
@@ -522,6 +605,11 @@ export interface components {
       created_at: string;
       /** Current Version Id */
       current_version_id?: string | null;
+      /**
+       * Legal Hold
+       * @default false
+       */
+      legal_hold: boolean;
     };
     /** DocumentPage */
     DocumentPage: {
@@ -529,6 +617,20 @@ export interface components {
       data: components["schemas"]["DocumentOut"][];
       /** Next Cursor */
       next_cursor: string | null;
+    };
+    /** DoneEvent */
+    DoneEvent: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "done";
+      data: components["schemas"]["DoneEventData"];
+    };
+    /** DoneEventData */
+    DoneEventData: {
+      /** Query Id */
+      query_id: string;
     };
     /** EraseRequest */
     EraseRequest: {
@@ -600,6 +702,20 @@ export interface components {
       data: components["schemas"]["ErasureOut"][];
       /** Next Cursor */
       next_cursor: string | null;
+    };
+    /** ErrorEvent */
+    ErrorEvent: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "error";
+      data: components["schemas"]["ErrorEventData"];
+    };
+    /** ErrorEventData */
+    ErrorEventData: {
+      /** Detail */
+      detail: string;
     };
     /** FeedbackOut */
     FeedbackOut: {
@@ -674,6 +790,21 @@ export interface components {
       data: components["schemas"]["JobOut"][];
       /** Next Cursor */
       next_cursor: string | null;
+    };
+    /** LegalHoldRequest */
+    LegalHoldRequest: {
+      /** Legal Hold */
+      legal_hold: boolean;
+    };
+    /** LegalHoldResponse */
+    LegalHoldResponse: {
+      /**
+       * Document Id
+       * Format: uuid
+       */
+      document_id: string;
+      /** Legal Hold */
+      legal_hold: boolean;
     };
     /** MeResponse */
     MeResponse: {
@@ -762,6 +893,34 @@ export interface components {
       /** Acl Version */
       acl_version: number;
     };
+    /** StatusEvent */
+    StatusEvent: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "status";
+      data: components["schemas"]["StatusEventData"];
+    };
+    /** StatusEventData */
+    StatusEventData: {
+      /** Stage */
+      stage: string;
+    };
+    /** TokenEvent */
+    TokenEvent: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "token";
+      data: components["schemas"]["TokenEventData"];
+    };
+    /** TokenEventData */
+    TokenEventData: {
+      /** Text */
+      text: string;
+    };
     /** UploadAccepted */
     UploadAccepted: {
       /**
@@ -782,6 +941,28 @@ export interface components {
       /** Dispatch */
       dispatch: string;
     };
+    /** UsageEvent */
+    UsageEvent: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "usage";
+      data: components["schemas"]["UsageEventData"];
+    };
+    /** UsageEventData */
+    UsageEventData: {
+      /** Input Tokens */
+      input_tokens: number;
+      /** Output Tokens */
+      output_tokens: number;
+      /** Cache Read Input Tokens */
+      cache_read_input_tokens: number;
+      /** Cost Usd */
+      cost_usd: string;
+      /** Model */
+      model: string;
+    };
     /** ValidationError */
     ValidationError: {
       /** Location */
@@ -794,6 +975,22 @@ export interface components {
       input?: unknown;
       /** Context */
       ctx?: Record<string, never>;
+    };
+    /** VerdictEvent */
+    VerdictEvent: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      event: "verdict";
+      data: components["schemas"]["VerdictEventData"];
+    };
+    /** VerdictEventData */
+    VerdictEventData: {
+      /** Groundedness */
+      groundedness: string;
+      /** Citation Coverage */
+      citation_coverage: number;
     };
     /** VersionOut */
     VersionOut: {
@@ -1442,6 +1639,38 @@ export interface operations {
       };
     };
   };
+  delete_acl_entry_route_api_v1_acl_entries__entry_id__delete: {
+    parameters: {
+      query?: never;
+      header?: {
+        authorization?: string | null;
+        "X-Dev-User"?: string | null;
+      };
+      path: {
+        entry_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   chat_completions_api_v1_chat_completions_post: {
     parameters: {
       query?: never;
@@ -1458,13 +1687,14 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Successful Response */
+      /** @description When stream=false: JSON batch of the same events. When stream=true: SSE frames (`event:` + `data:` JSON). */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": unknown;
+          "application/json": components["schemas"]["ChatCompletionsJsonResponse"];
+          "text/event-stream": string;
         };
       };
       /** @description Validation Error */
@@ -1608,6 +1838,44 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["EraseResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  set_legal_hold_api_v1_admin_documents__document_id__legal_hold_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        authorization?: string | null;
+        "X-Dev-User"?: string | null;
+      };
+      path: {
+        document_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LegalHoldRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LegalHoldResponse"];
         };
       };
       /** @description Validation Error */
