@@ -14,12 +14,31 @@ DEFAULT_EMBEDDING_MODEL = "BAAI/bge-m3"
 DEFAULT_RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
 
 
+def _embedding_identity() -> tuple[str, str]:
+    name = (
+        os.environ.get("EMBEDDING_MODEL_NAME")
+        or os.environ.get("EMBEDDING_MODEL")
+        or DEFAULT_EMBEDDING_MODEL
+    ).strip()
+    override = (os.environ.get("EMBEDDING_MODEL_VERSION") or "").strip()
+    backend = (os.environ.get("INFERENCE_BACKEND") or "bge").strip().lower() or "bge"
+    if override and not (backend != "stub" and override == "stub-v0"):
+        return name, override
+    return name, "stub-v0" if backend == "stub" else f"{backend}-v1"
+
+
 class InferenceBackend(Protocol):
     @property
     def embedding_model(self) -> str: ...
 
     @property
     def rerank_model(self) -> str: ...
+
+    @property
+    def embedding_version(self) -> str: ...
+
+    @property
+    def rerank_version(self) -> str: ...
 
     def embed(self, texts: list[str], *, mode: str) -> list[list[float]]: ...
 
@@ -44,8 +63,10 @@ def stub_vector(text: str) -> list[float]:
 class StubBackend:
     """Deterministic backend used only when ``INFERENCE_BACKEND=stub``."""
 
-    embedding_model = "deterministic-hash-test-stub"
+    embedding_model = DEFAULT_EMBEDDING_MODEL
+    embedding_version = "stub-v0"
     rerank_model = "identity-rerank-test-stub"
+    rerank_version = "stub-v0"
 
     def embed(self, texts: list[str], *, mode: str) -> list[list[float]]:
         del mode
@@ -69,8 +90,9 @@ class BgeBackend:
                 "with `uv sync --package enterprise-rag-inference --extra models`"
             ) from exc
 
-        self.embedding_model = os.environ.get("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL).strip()
+        self.embedding_model, self.embedding_version = _embedding_identity()
         self.rerank_model = os.environ.get("RERANK_MODEL", DEFAULT_RERANK_MODEL).strip()
+        self.rerank_version = os.environ.get("RERANK_MODEL_VERSION", "bge-v1").strip()
         device = os.environ.get("INFERENCE_DEVICE", "cpu").strip()
         self._batch_size = _positive_int_env("INFERENCE_BATCH_SIZE", default=16)
         self._lock = Lock()

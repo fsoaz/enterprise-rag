@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -13,6 +14,7 @@ from db.models import Chunk, ChunkEmbedding, Document, DocumentVersion
 from domain.embeddings import embedding_model_meta
 from domain.types import DEFAULT_TOP_K_RETRIEVAL, INJECTION_RISK_BLOCK
 from retrieval.acl import AclResolution, document_acl_predicate
+from retrieval.temporal import version_predicate
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +35,14 @@ async def dense_search(
     tenant_id: UUID,
     query_vector: list[float],
     acl: AclResolution,
+    as_of: datetime | None = None,
     top_k: int = DEFAULT_TOP_K_RETRIEVAL,
+    embedding_model_name: str | None = None,
+    embedding_model_version: str | None = None,
 ) -> list[DenseHit]:
     model_name, model_version = embedding_model_meta()
+    model_name = embedding_model_name or model_name
+    model_version = embedding_model_version or model_version
     # Cosine distance operator <=> ; similarity = 1 - distance.
     distance = ChunkEmbedding.embedding.cosine_distance(query_vector)
 
@@ -56,7 +63,7 @@ async def dense_search(
             ChunkEmbedding.tenant_id == tenant_id,
             ChunkEmbedding.model_name == model_name,
             ChunkEmbedding.model_version == model_version,
-            DocumentVersion.effective_to.is_(None),
+            version_predicate(as_of),
             Document.archived_at.is_(None),
             Document.erased_at.is_(None),
             Chunk.injection_risk < INJECTION_RISK_BLOCK,
@@ -86,7 +93,14 @@ async def dense_search(
     ]
 
 
-async def embed_query(session: AsyncSession, query: str) -> list[float]:
+async def embed_query(
+    session: AsyncSession,
+    query: str,
+    *,
+    embedding_model_name: str | None = None,
+    embedding_model_version: str | None = None,
+    inference_endpoint: str | None = None,
+) -> list[float]:
     """Unused DB session kept for interface symmetry; embedding is via inference HTTP."""
     del session  # interface symmetry with other stages
     import httpx
@@ -94,15 +108,28 @@ async def embed_query(session: AsyncSession, query: str) -> list[float]:
     from domain.errors import InferenceUnavailable
     from retrieval.rerank import inference_base_url, inference_headers
 
+    expected_name, expected_version = embedding_model_meta()
+    expected_name = embedding_model_name or expected_name
+    expected_version = embedding_model_version or expected_version
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"{inference_base_url()}/v1/embed",
+                f"{(inference_endpoint or inference_base_url()).rstrip('/')}/v1/embed",
                 json={"texts": [query], "mode": "query"},
                 headers=inference_headers(),
             )
             response.raise_for_status()
-            vectors = response.json()["vectors"]
+            payload = response.json()
+            if (embedding_model_name is not None or embedding_model_version is not None) and (
+                payload.get("model") != expected_name or payload.get("version") != expected_version
+            ):
+                raise InferenceUnavailable(
+                    "query embed model identity mismatch: "
+                    f"requested {expected_name}@{expected_version}, "
+                    f"received {payload.get('model')}@{payload.get('version')}"
+                )
+            vectors = payload["vectors"]
             result: list[float] = list(vectors[0])
             return result
     except (httpx.HTTPError, KeyError, IndexError) as exc:

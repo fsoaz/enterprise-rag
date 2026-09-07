@@ -4,6 +4,50 @@
 > One entry per completed task. Never edit or delete a past entry; correct it with a new one that says what changed.
 > **Related:** [current_task.md](./current_task.md) · [test_evidence.md](./test_evidence.md) · [review_notes.md](./review_notes.md)
 
+## 2026-09-07 — T-407 CI evaluation gates (implementation)
+
+**Status:** in_review
+**PR:** —
+**Branch:** working tree
+
+### What changed
+
+Added the inference-backed `eval-smoke` GitHub Actions job and scheduled full-run
+workflow. The CI harness validates the complete committed corpus, selects a
+deterministic 48-item all-slice smoke set, loads it through the real worker
+pipeline, runs the T-406 four-strategy comparison, publishes artifacts, and applies
+strict quality/security thresholds against the committed stub baseline.
+
+### Decisions
+
+The smoke gate compares the `hybrid_rrf` baseline strategy against the committed
+known-good report; security metrics are checked for every strategy. Null optional
+inference endpoints are normalized in the worker so JSON configuration cannot turn
+`null` into the literal URL `"None"`.
+
+### Verification
+
+[E-012](./test_evidence.md) records 16 focused tests and the local disposable
+service run. The first GitHub Actions smoke result is still required before R-031
+can be marked resolved.
+
+### Follow-ups
+
+R-031 remains `scheduled` pending green GitHub Actions evidence. T-408 and T-409
+remain subsequent experiment tasks.
+
+## 2026-09-07 — T-406 strategy comparison runner
+
+Implemented the JSON-configured comparison runner with strict validation, deterministic
+Cartesian sweeps, sequential API/Celery child execution, terminal-result polling, paired
+10,000-resample bootstrap confidence intervals, and reproducible overall/per-slice reports.
+Retrieval now carries immutable run-level embedding/reranker identities and inference
+endpoints, validates inference response identities, and preserves older retrieval callers.
+Added the canonical `/api/v1/evals/runs/compare?ids=...` matrix endpoint, exact result
+coverage/conflict enforcement, item-level slices, additive persistence fields, OpenAPI and
+frontend type synchronization, and live disposable-Postgres evidence. No paid model calls
+were made; T-407 CI gates and later experiments remain outstanding.
+
 ## Entry format
 
 ```markdown
@@ -464,3 +508,128 @@ Documentation review only; no tests exist yet. See [test_evidence.md](./test_evi
 ### Follow-ups
 
 Four open questions are recorded in [product.md § 10](../context/product.md#10-open-questions) and scheduled for resolution: Q-1 and Q-2 by experiment in Phase 4, Q-3 and Q-4 as product decisions in Phases 3 and 6.
+
+## 2026-09-06 — R-070 local implementation
+
+Reconciled stale handoff against committed July 31 QA remediation. Added strict
+JSON/SSE chat transport-outage tests; negative stream-order mutation detected.
+Ruff, formatting, mypy, and unit suite pass (83 passed, 1 skipped, 15 deselected).
+No release completion or CI claim; full scope and US$25 ceiling remain unchanged.
+
+## 2026-09-06 — R-030 local implementation
+
+Added shared UTC parsing and half-open version filtering through search, chat,
+retrieval arms and evaluation dates. Exact historical citations and current
+security controls verified on disposable Postgres under all four strategies.
+Regenerated contracts/types. Full Phase 4, R-031, experiments and release
+evaluation are still unimplemented; Milestone A is not complete.
+
+## 2026-09-07 — T-401 local implementation
+
+Added a reproducible synthetic source catalog and renderer: 40 bilingual operational
+scenarios, dated policy revisions, routing and restricted records, eight balanced
+attack families, and 40 conflicting Globex counterparts. Added strict manifest
+validation for hashes, safe paths, intervals, tenant groups, labels, and privacy.
+Renderer, parser/chunker, manifest tests, Ruff, and mypy pass. Full suite: 122
+passed, 1 existing dependency skip, 19 integration deselections. No paid calls or
+CI evidence; database load remains for the evaluation foundation tasks.
+
+## 2026-09-07 — T-402 local implementation
+
+Generated the eight immutable golden JSONL slices from the T-401 catalog, exactly
+40 cases each. Added explicit labels, expected facts, PT/EN direction checks,
+version boundary/current/absent cases, acting users, prohibited sources, and
+abstention expectations. Dataset validation and reproducibility checks pass; no
+model calls, CI result, or quality score was produced.
+
+## 2026-09-07 — T-403 local implementation
+
+Completed retrieval metrics with precision@10, explicit empty-gold behavior,
+duplicate-version collapse, and per-slice/language aggregation. The production
+harness validates the dataset before retrieval and deduplicates mapped version
+labels before scoring. Focused tests, Ruff, and mypy pass; no quality baseline or
+real-model result was changed.
+
+## 2026-09-07 — T-405 foundation (in progress)
+
+Added tenant-admin evaluation dataset/item/run/result/comparison routes with
+keyset pagination, duplicate registration conflicts, persisted run configuration,
+judge hash, progress/error fields in run params, and OpenAPI/type regeneration.
+The Celery evaluation worker, result persistence, cost-ledger reconciliation, and
+database integration checks remain pending; no completion claim is made.
+
+## 2026-09-07 — T-404 local implementation
+
+Moved entailment judging to the versioned `entailment_v1` rubric under
+`evals/harness/judges`, recorded its SHA-256 and Haiku model identity, and added
+strict parsing. Missing, duplicate, malformed, or out-of-range labels now produce
+an explicit incomplete result and cannot upgrade groundedness. Focused judge tests,
+Ruff, and mypy pass; no live judge call or paid spend occurred.
+
+## 2026-09-07 — T-405 worker foundation (in progress)
+
+Registered `worker.tasks.eval.run_eval`. It resolves tenant and dataset from the
+persisted run under the migration identity, runs retrieval for each item, writes
+per-item retrieval metrics/results, updates progress, and records explicit
+incomplete status when answer generation is unavailable. API registration now
+rejects cross-tenant acting users and gold chunks. Generation/judging, ledger
+accounting, retry semantics, and database integration remain open.
+
+## 2026-09-07 — T-405 execution implementation (integration pending)
+
+Replaced the placeholder evaluation worker with durable per-item execution using
+the production retrieval/generation primitives and the versioned `entailment_v1`
+Haiku judge. Results now persist answer text, citations, verdict, answer/citation/
+faithfulness/relevance/abstention/authorization metrics, judge hash, and total
+reconciled cost. Generation, judge, and budget-rejection attempts are linked to
+the run and item in `cost_ledger`; terminal result uniqueness makes Celery
+redelivery idempotent. Added additive migration `0005_eval_execution`, documented
+dataset fields and validation, API contract regeneration, and focused failure /
+success worker tests. Focused tests, Ruff, mypy, OpenAPI, generated client, and
+offline migration SQL checks pass. Docker is unavailable in this environment, so
+the disposable-Postgres integration suite was not run and T-405 remains open.
+
+## 2026-09-07 — T-405 complete (Podman verification)
+
+Started disposable Postgres, Redis, and stub inference services with Podman.
+Applied the init SQL and Alembic migrations through `0005_eval_execution`,
+seeded the test database, and ran the T-405 API integration tests plus the full
+integration marker. Results: T-405 integration 2 passed; full integration 18
+passed, 3 skipped, 138 deselected. No paid model calls occurred. T-405 is now
+complete with database migration, registration, run/progress, result/failure,
+pagination, comparison, authorization, and tenant-isolation evidence.
+
+
+## 2026-09-07 — Documentation audit remediation
+
+Applied the nine documentation-audit corrections: worker startup and process
+environment loading, upload retry semantics and job polling, security automation
+status, proposed cloud deployment status, source-driven API generation, fixed
+pagination ordering, and tracked documentation ownership. The README now leads
+with prerequisites, full Compose startup, readiness checks, and contribution
+links. Added `docs/guides/local-development.md` for separate-process startup,
+configuration loading, first-upload verification, and failure diagnosis; replaced
+the frontend scaffold README with project-specific guidance. Also corrected the
+related seed-content claim, local bypass CORS setup, CI job inventory, and Python
+coverage-enforcement claim. Existing implementation and documentation edits were
+preserved; no application code or generated API files were changed by this task.
+
+Validation performed on the current working tree:
+
+- Checked 162 local links, including Markdown heading anchors, across the seven
+  edited/new reader-facing documents: all resolved.
+- Parsed 21 shell blocks with `bash -n`: all passed.
+- Compared both OpenAPI JSON files with `app.openapi()`: both matched.
+- Checked upload response fields, job route/state/schema, lack of upload
+  idempotency parameters, and fixed-order listing parameters against the runtime
+  schema and domain enum: passed.
+- Executed direct liveness and inference service-token checks: passed.
+- Executed an isolated uv environment-file/precedence check with uv 0.12.10: passed.
+- Confirmed documented Make targets, npm scripts, runtime pins, and toolchain
+  paths exist. `git diff --check` passed.
+
+[VERIFY] Full Docker Compose startup, real-model loading, OIDC sign-in, and the UI
+upload walkthrough were not executed in this documentation pass. The Docker CLI
+is unavailable here. Hosted branch protection, external scanning, and any cloud
+infrastructure outside this repository remain unverified. Earlier historical
+execution entries above retain their original scope and evidence.

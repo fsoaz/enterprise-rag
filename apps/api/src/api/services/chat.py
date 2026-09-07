@@ -139,6 +139,7 @@ async def run_chat(
     tenant_id: UUID,
     user_id: UUID,
     question: str,
+    as_of: datetime | None = None,
     conversation_history: list[ConversationMessage] | None = None,
     strategy: RetrievalStrategy = RetrievalStrategy.HYBRID_RRF,
     anthropic_api_key: str = "",
@@ -151,7 +152,12 @@ async def run_chat(
     yield {"event": "status", "data": {"stage": "retrieving"}}
 
     result = retrieval_result or await retrieve(
-        session, tenant_id=tenant_id, user_id=user_id, query=question, strategy=strategy
+        session,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        query=question,
+        strategy=strategy,
+        as_of=as_of,
     )
     use_live_llm = _use_live_llm(anthropic_api_key)
     # Degraded mode shows only chunks backed by primary-language lexical evidence.
@@ -302,6 +308,10 @@ async def run_chat(
         pairs = [(generation.answer_text, c.cited_text) for c in generation.citations[:8]]
         judge = await client.judge_entailment(pairs)
         labels = judge.labels
+        if not judge.complete:
+            # A partial judge response is an incomplete evaluation, never evidence
+            # that can upgrade the answer to grounded.
+            labels = ["unrelated"] * len(labels)
 
     verdict = groundedness_verdict(
         coverage=coverage or 0.0,

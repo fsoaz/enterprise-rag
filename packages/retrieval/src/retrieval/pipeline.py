@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from domain.temporal import parse_as_of
 from domain.text import detect_supported_language
 from domain.types import (
     DEFAULT_RRF_K,
@@ -57,11 +59,20 @@ async def retrieve(
     tenant_id: UUID,
     user_id: UUID,
     query: str,
+    as_of: datetime | None = None,
     strategy: RetrievalStrategy | str = RetrievalStrategy.HYBRID_RRF,
     top_k: int = DEFAULT_TOP_K_RERANK,
     retrieval_k: int = DEFAULT_TOP_K_RETRIEVAL,
     rrf_k: int = DEFAULT_RRF_K,
+    embedding_model: str | None = None,
+    embedding_model_name: str | None = None,
+    embedding_model_version: str | None = None,
+    reranker: str | None = None,
+    reranker_version: str | None = None,
+    inference_endpoint: str | None = None,
+    reranker_endpoint: str | None = None,
 ) -> RetrievalResult:
+    as_of = parse_as_of(as_of)
     strategy_value = strategy.value if isinstance(strategy, RetrievalStrategy) else str(strategy)
     acl = await resolve_acl(session, tenant_id=tenant_id, user_id=user_id)
     lang = _detect_language_hint(query)
@@ -81,13 +92,32 @@ async def retrieve(
     }
 
     if need_dense:
-        vector = await embed_query(session, query)
+        embedding_kwargs = {
+            key: value
+            for key, value in {
+                "embedding_model_name": embedding_model_name or embedding_model,
+                "embedding_model_version": embedding_model_version,
+                "inference_endpoint": inference_endpoint,
+            }.items()
+            if value is not None
+        }
+        vector = await embed_query(session, query, **embedding_kwargs)
+        dense_kwargs = {
+            key: value
+            for key, value in {
+                "embedding_model_name": embedding_model_name or embedding_model,
+                "embedding_model_version": embedding_model_version,
+            }.items()
+            if value is not None
+        }
         for dhit in await dense_search(
             session,
             tenant_id=tenant_id,
             query_vector=vector,
             acl=acl,
+            as_of=as_of,
             top_k=retrieval_k,
+            **dense_kwargs,
         ):
             dense_hits.append(
                 RetrievalHit(
@@ -109,6 +139,7 @@ async def retrieve(
             tenant_id=tenant_id,
             query=query,
             acl=acl,
+            as_of=as_of,
             top_k=retrieval_k,
             language_hint=lang,
         ):
@@ -154,10 +185,20 @@ async def retrieve(
         if strategy_value == RetrievalStrategy.HYBRID_RERANK.value and fused_hits:
             # Rerank up to retrieval_k candidates, keep top_k.
             candidates = fused_hits[:retrieval_k]
+            rerank_kwargs = {
+                key: value
+                for key, value in {
+                    "reranker_model": reranker,
+                    "reranker_version": reranker_version,
+                    "inference_endpoint": reranker_endpoint or inference_endpoint,
+                }.items()
+                if value is not None
+            }
             reranked = await rerank_documents(
                 query,
                 [h.body for h in candidates],
                 top_k=min(top_k, len(candidates)),
+                **rerank_kwargs,
             )
             hits = [
                 RetrievalHit(

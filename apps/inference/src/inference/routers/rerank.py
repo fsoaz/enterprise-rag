@@ -23,6 +23,7 @@ class RerankResult(BaseModel):
 class RerankResponse(BaseModel):
     results: list[RerankResult]
     model: str
+    version: str
 
 
 @router.post("/rerank", response_model=RerankResponse)
@@ -31,4 +32,6 @@ async def rerank(body: RerankRequest) -> RerankResponse:
     scores = await anyio.to_thread.run_sync(backend.rerank, body.query, body.documents)
     ranked = sorted(enumerate(scores), key=lambda item: (-item[1], item[0]))[: body.top_k]
     results = [RerankResult(index=index, score=score) for index, score in ranked]
-    return RerankResponse(results=results, model=backend.rerank_model)
+    return RerankResponse(
+        results=results, model=backend.rerank_model, version=backend.rerank_version
+    )

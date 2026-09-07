@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Enterprise RAG web
 
-## Getting Started
+The Next.js frontend provides bilingual chat and document administration. In the
+default OIDC configuration, browser requests use `/api/backend/...`; the Next.js
+server forwards them to FastAPI with a bearer token. Authentication routes and
+token refresh run on the web server.
 
-First, run the development server:
+## Getting started
+
+Use Node **22** and npm. Run the commands below from the **repository root**.
+First start the backend dependencies using the
+[local development guide](../../docs/guides/local-development.md#run-processes-separately).
+API and Keycloak must be reachable for sign-in and data access.
+
+For a fresh local configuration:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp apps/web/.env.example apps/web/.env.local
+npm ci --prefix apps/web
+npm run dev --prefix apps/web
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Keep an existing `.env.local` if already configured. Open `http://localhost:3000`
+and use the [seeded sign-in identities](../../README.md#dev-auth-and-network-exposure).
+The [first-upload walkthrough](../../docs/guides/local-development.md#verify-an-upload)
+checks the backend and worker as well as the page.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Configuration
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+[.env.example](.env.example) is the canonical frontend configuration template.
+Server settings include the API origin and OIDC issuer/client configuration.
+`NEXT_PUBLIC_*` values enter the client bundle and must never contain secrets.
+Restart local development after configuration changes; rebuild deployed client
+bundles when changing public values.
 
-## Learn More
+Use `localhost` consistently with the seeded issuer and callback configuration.
+For optional header-based impersonation and its required API/CORS settings, see
+[development authentication](../../README.md#dev-auth-and-network-exposure).
+The full Compose workflow sets web configuration through its build arguments and
+service environment, rather than this local file.
 
-To learn more about Next.js, take a look at the following resources:
+## Checks and contribution
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run lint --prefix apps/web
+npm test --prefix apps/web
+npm run test:coverage --prefix apps/web
+npm run build --prefix apps/web
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Run `make typecheck` from the repository root for TypeScript and Python checks.
+Frontend coverage thresholds are configured in [vitest.config.ts](vitest.config.ts).
+Route visible strings through [i18n.tsx](src/lib/i18n.tsx) with English and Portuguese
+translations. Follow the [API generation workflow](../../docs/standards/conventions.md#2-toolchain)
+when backend contracts change; generated files must not be edited manually.
 
-## Deploy on Vercel
+Useful source entry points:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- [Chat page](<src/app/(chat)/page.tsx>).
+- [Document administration](<src/app/(admin)/admin/page.tsx>).
+- [API proxy](<src/app/api/backend/[...path]/route.ts>).
+- [Server authentication](src/lib/auth/server.ts).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deployment and troubleshooting
+
+The [root Compose workflow](../../README.md#getting-started) builds and runs the web
+container with the other services. Cloud deployment is a
+[proposed architecture](../../docs/context/architecture.md#172-cloud--aws), not an
+implemented release procedure. Use the
+[local troubleshooting guide](../../docs/guides/local-development.md#troubleshooting)
+for readiness and ingestion failures.

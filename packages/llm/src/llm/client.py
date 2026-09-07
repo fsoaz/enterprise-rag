@@ -16,6 +16,7 @@ from anthropic import (
 )
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
+from llm.judge import parse_judgement, rubric_hash, rubric_text
 from llm.models import (
     EXTRACTIVE_FALLBACK_MODEL,
     JUDGE_MODEL,
@@ -57,13 +58,6 @@ class CitationSpan:
     answer_sentence_idx: int
 
 
-_ENTAILMENT_LABELS = frozenset({"entailed", "partial", "contradicted", "unrelated"})
-_JUDGE_LINE = re.compile(
-    r"^\s*(?P<index>\d+)\s*[.):\-]?\s*(?P<label>entailed|partial|contradicted|unrelated)\b",
-    re.IGNORECASE | re.MULTILINE,
-)
-
-
 @dataclass(frozen=True, slots=True)
 class JudgeResult:
     """Entailment labels plus the usage they cost, so the judge lands in the ledger."""
@@ -74,6 +68,9 @@ class JudgeResult:
     output_tokens: int = 0
     cache_read_input_tokens: int = 0
     cost_usd: Decimal = Decimal("0")
+    complete: bool = True
+    error: str | None = None
+    prompt_hash: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -433,16 +430,11 @@ class AnthropicClient:
         groundedness verdict for the wrong claim.
         """
         if not pairs:
-            return JudgeResult(labels=[], model=JUDGE_MODEL)
+            return JudgeResult(labels=[], model=JUDGE_MODEL, prompt_hash=rubric_hash())
         lines = "\n".join(
             f"{i}. CLAIM: {claim}\n   SPAN: {span}" for i, (claim, span) in enumerate(pairs)
         )
-        prompt = (
-            "For each numbered pair, reply with one of: "
-            "entailed, partial, contradicted, unrelated.\n"
-            "Output exactly one line per pair, formatted as `<index>: <label>`, "
-            "and nothing else.\n\n" + lines
-        )
+        prompt = rubric_text() + "\n\n" + lines
         response = await self._client.messages.create(
             model=JUDGE_MODEL,
             max_tokens=256,
@@ -453,21 +445,14 @@ class AnthropicClient:
             if getattr(block, "type", None) == "text":
                 text += getattr(block, "text", "") or ""
 
-        # Unmatched pairs stay "unrelated" — the conservative label, since an
-        # unparsed judgement must not be able to upgrade a verdict.
-        labels = ["unrelated"] * len(pairs)
-        for match in _JUDGE_LINE.finditer(text):
-            index = int(match.group("index"))
-            label = match.group("label").lower()
-            if 0 <= index < len(pairs) and label in _ENTAILMENT_LABELS:
-                labels[index] = label
+        parsed = parse_judgement(text, len(pairs))
 
         usage = response.usage
         input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
         output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
         cache_read = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
         return JudgeResult(
-            labels=labels,
+            labels=parsed.labels,
             model=JUDGE_MODEL,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -478,6 +463,9 @@ class AnthropicClient:
                 output_tokens=output_tokens,
                 cache_read=cache_read,
             ),
+            complete=parsed.complete,
+            error=parsed.error,
+            prompt_hash=rubric_hash(),
         )
 
 

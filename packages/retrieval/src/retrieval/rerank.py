@@ -36,18 +36,32 @@ async def rerank_documents(
     documents: list[str],
     *,
     top_k: int = DEFAULT_TOP_K_RERANK,
+    reranker_model: str | None = None,
+    reranker_version: str | None = None,
+    inference_endpoint: str | None = None,
 ) -> list[RerankResult]:
     if not documents:
         return []
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
-                f"{inference_base_url()}/v1/rerank",
+                f"{(inference_endpoint or inference_base_url()).rstrip('/')}/v1/rerank",
                 json={"query": query, "documents": documents, "top_k": top_k},
                 headers=inference_headers(),
             )
             response.raise_for_status()
             payload = response.json()
+            if reranker_model is not None or reranker_version is not None:
+                expected_version = reranker_version or ""
+                if (
+                    payload.get("model") != reranker_model
+                    or payload.get("version") != expected_version
+                ):
+                    raise InferenceUnavailable(
+                        "rerank model identity mismatch: "
+                        f"requested {reranker_model}@{expected_version}, "
+                        f"received {payload.get('model')}@{payload.get('version')}"
+                    )
             return [
                 RerankResult(index=int(item["index"]), score=float(item["score"]))
                 for item in payload["results"]

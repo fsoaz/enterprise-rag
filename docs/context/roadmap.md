@@ -214,15 +214,27 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
 
 ### Exit criteria
 
-- [x] Full eval run completes and writes results for every slice — `--load-corpus` then `run`, 14 items across all 8 slices ([E-003](../execution/test_evidence.md))
-- [ ] The strategy comparison produces a matrix with per-slice deltas — per-slice metrics exist; the strategy sweep does not
+- [x] Full eval run completes and writes results for every slice — the historical
+  `--load-corpus` then `run` verification covered 14 items across all 8 slices
+  ([E-003](../execution/test_evidence.md)); the expanded T-402 artifact contains
+  320 validated items (40 per slice).
+- [x] The strategy comparison produces a matrix with per-slice deltas — T-406 comparison runner/API report includes paired coverage, deltas, and significance
 - [ ] `hybrid_rerank` is demonstrably the best default, with numbers — **blocked on T-206.** A stub cannot beat RRF; the default is `hybrid_rrf` until real reranker weights land ([ADR-009](./architecture.md#adr-009--a-stub-degrades-to-a-no-op-never-to-a-wrong-signal))
-- [ ] A deliberate retrieval regression is caught by the PR gate — **blocked on R-031**, evals are not in CI
+- [ ] A deliberate retrieval regression is caught by the PR gate — T-407 implements the
+  deterministic `eval-smoke` gate and its regression tests; hosted GitHub Actions evidence
+  is still pending before R-031 can be closed
 - [x] Cross-tenant leakage and ACL bypass both measure **0** on the `permission` slice — `acme-viewer` retrieves only the restricted document, `acme-member` retrieves everything except it
 - [ ] Injection success rate ≤ 1% on the `injection` slice — not measurable without a real `ANTHROPIC_API_KEY`; retrieval on that slice is scored, generation is not
 - [ ] Q-1 and Q-2 are decided and recorded as ADRs in [architecture.md § 15](./architecture.md#15-architecture-decision-records)
 
 > **Status note (2026-07-25).** The harness itself is real: it ingests `evals/fixtures` through the worker pipeline and calls `retrieve()` per item as the item's `acting_user`. It replaced a version that scored `gold_chunk_ids` against themselves and reported 1.0 on metrics it never computed (R-018). Two slices now show honest failures — `versioned` at 0.50 because retrieval has no `as_of` filter (R-030), and `unanswerable` at 0.00 by construction. Dataset volume is also well short of the "minimum 40 items per slice" deliverable: 14 items total.
+
+> **Status note (2026-09-07).** T-406 is complete. The comparison runner expands
+> strict JSON sweeps into sequential child runs, persists the full configuration in
+> `EvalRun.params`, and produces the canonical API matrix with exact-result coverage,
+> per-slice deltas, and deterministic paired-bootstrap significance. The default
+> baseline is `hybrid_rrf`; the API baseline is the first run ID supplied. T-407
+> remains the CI-gate task, while T-408 and T-409 remain experiment tasks.
 
 **Stories:** KW-5, PA-4
 

@@ -55,7 +55,7 @@
 | Frontend i18n | Typed in-repo dictionary (`apps/web/src/lib/i18n.tsx`) | EN + PT, the two corpus languages. A React context and a `locale` cookie, not a framework: one dictionary object per locale, keys typed so a missing translation is a `tsc` failure |
 | Auth | OIDC / JWT — Keycloak (dev), Cognito or Auth0 (cloud) | Standard claims, no bespoke auth code. The browser holds a session cookie, never a token — see [ADR-013](#adr-013--the-browser-never-holds-a-token) |
 | Observability | OpenTelemetry, `structlog`, Prometheus | Traces across four services; JSON logs; metrics |
-| Container / IaC | Docker, Docker Compose (dev), Terraform → AWS ECS Fargate (cloud) | Reproducible dev; real cloud deploy |
+| Container / IaC | Docker Compose (implemented); Terraform → AWS ECS Fargate (proposed) | Local deployment exists; cloud infrastructure and deployment automation are not implemented in this repository |
 | Testing (Python) | pytest, Playwright, k6 | See [testing.md](../standards/testing.md) |
 | Testing (frontend) | Vitest + Testing Library + jsdom | Component and module tier for `apps/web`. Added because every frontend defect in the QA round survived `tsc`, `biome` and `next build` — none of which loads a page (R-070) |
 
@@ -659,6 +659,14 @@ Answer-quality metrics use `claude-haiku-4-5` as judge with a fixed, versioned r
 
 An eval run is `(dataset_version, strategy, embedding_model, reranker, generator_model, params)`. The dashboard renders a comparison matrix across runs with per-slice deltas and significance flags, so "hybrid+rerank beats dense-only" is a measured claim with a number attached, not a design assertion. This is [differentiator #5](./product.md#6-differentiators-vs-tutorial-rag).
 
+The current API surface is `GET /api/v1/evals/runs/compare?ids=a,b,c`. Run IDs
+are ordered; the first is the baseline, and every run must be terminal `complete`
+with exactly one result for every item in the shared dataset. The report includes
+overall and per-slice values, signed and absolute baseline deltas, coverage and
+result counts, 95% confidence bounds, and deterministic significance flags. Paired
+significance is calculated over aligned item IDs with 10,000 bootstrap resamples and
+a fixed seed. The legacy two-run route remains available for compatibility.
+
 ### 11.4 CI integration
 
 **Target:**
@@ -669,12 +677,17 @@ An eval run is `(dataset_version, strategy, embedding_model, reranker, generator
 | Nightly | Full dataset, all strategies | Reports to the dashboard; opens an issue on regression |
 | Pre-release | Full + security suite | Cross-tenant leakage and ACL bypass are hard zeroes |
 
-**Actual: none of these rows exists yet (R-031).** The eval harness runs only as a local
-command. The other contract gates *are* wired — `make openapi-check` and a regeneration
-check on `src/lib/generated/api.ts` both run in the `typecheck` job, and `web-test` runs
-Vitest with coverage — so the eval gate is now the only hole in this table. Distinguishing
-the two states in this document is deliberate: a planned gate written in the present tense
-is how a table like this stops describing the system.
+**Actual: the evaluation jobs are implemented; hosted-run evidence is pending (T-407).**
+The pull-request `eval-smoke` job runs the production API/worker path against disposable
+Postgres and Redis plus deterministic stub inference, selects 48 items across all eight
+slices, and blocks on the committed baseline thresholds. The scheduled `eval-full` job
+runs all 320 items and four configured retrieval strategies, retaining its report without
+paid model calls. The local baseline and focused gate tests are committed in
+`evals/baselines/` and `evals/harness/`.
+
+The first successful GitHub Actions smoke run is still required to close R-031 and
+confirm the hosted service wiring. Live Anthropic answer quality, latency, and cost
+remain outside this deterministic gate.
 
 ## 12. Cost, Quotas & Observability
 
@@ -1056,9 +1069,20 @@ throughout: default Postgres, MinIO and Keycloak passwords, no Redis auth, and
 a development identity provider and an unauthenticated cache to anything that can route to
 the host. It is documented so the choice is explicit, not so it is convenient.
 
-`make up` brings the stack up, runs migrations, and seeds two demo tenants with a bilingual corpus and distinct ACLs — so cross-tenant and permission behavior is demonstrable from the first minute. The Keycloak realm and the database seed share stable tenant UUIDs, so a database created before the realm import must be rebuilt with `make db-reset` for the two to agree.
+`make up` starts the stack, runs migrations, and seeds two demo tenants with users,
+groups, roles, collections, and ACLs. It does not load document content. Follow
+the [first-upload verification](../guides/local-development.md#verify-an-upload)
+or load the evaluation fixtures separately. The Keycloak realm and database seed
+share stable tenant UUIDs. For a disposable database created before that mapping,
+`make db-reset` rebuilds the database and seed; it deletes all existing development data.
 
 ### 17.2 Cloud — AWS
+
+**Proposed architecture, not a deployment guide.** `infra/terraform/` contains only
+`.gitkeep`; this repository has no Terraform resources, ECS task definitions, or
+cloud provisioning commands. The table records the intended topology, not
+verified deployed services. [VERIFY] Any infrastructure maintained outside this
+repository requires separate configuration and deployment evidence.
 
 | Component | AWS service | Notes |
 | --- | --- | --- |
@@ -1077,6 +1101,9 @@ the host. It is documented so the choice is explicit, not so it is convenient.
 
 ### 17.3 Environments
 
+`local` and `ci` have checked-in configuration. `staging` and `prod` describe target
+environments; their existence and configuration have not been verified.
+
 | Env | Purpose | Data |
 | --- | --- | --- |
 | `local` | Compose, hot reload | Seeded synthetic corpus |
@@ -1086,4 +1113,13 @@ the host. It is documented so the choice is explicit, not so it is convenient.
 
 ### 17.4 Release
 
-Trunk-based. CI runs lint → typecheck → unit → integration → contract → eval smoke → build → push. Deploy to staging is automatic on merge to `main`; production is a manual promotion of the same immutable image digest. Migrations run as a pre-deploy ECS task and must be backward-compatible with the currently running version (expand/contract pattern) — no deploy is allowed to require a simultaneous schema and code cutover.
+**Implemented:** [CI](../../.github/workflows/ci.yml) runs independent lint,
+typecheck/contract/build, unit, frontend, database integration, and container-build
+jobs. It does not publish images or deploy to staging or production. See the
+[CI status table](../standards/testing.md#12-ci-pipeline).
+
+**Proposed release process:** publish immutable images, deploy staging after merge,
+then manually promote the same image digest to production. Run backward-compatible
+migrations as a pre-deploy ECS task using the expand/contract pattern. Provisioning,
+credentials, rollout, rollback, and migration execution must be implemented and
+validated before this becomes an operational procedure.

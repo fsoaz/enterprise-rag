@@ -1,0 +1,115 @@
+{
+  "metadata": {
+    "config": {
+      "baseline": "hybrid_rrf",
+      "embedding_models": [
+        {
+          "name": "BAAI/bge-m3",
+          "version": "stub-v0"
+        }
+      ],
+      "rerankers": [
+        {
+          "name": "identity-rerank-test-stub",
+          "version": "stub-v0"
+        }
+      ],
+      "retrieval_params": [
+        {}
+      ],
+      "strategies": [
+        "hybrid_rrf",
+        "dense_only",
+        "lexical_only",
+        "hybrid_rerank"
+      ]
+    },
+    "dataset": {
+      "content_sha256": "32b0b7b1583fb163b6b8aa29a0af0fa128063fc4f29ee12bfbd5707fb88ea9a5",
+      "item_count": 48,
+      "item_ids": [
+        "pt-001", "pt-002", "pt-003", "pt-004", "pt-005", "pt-006",
+        "en-001", "en-002", "en-003", "en-004", "en-005", "en-006",
+        "xl-001", "xl-002", "xl-003", "xl-004", "xl-005", "xl-006",
+        "mh-001", "mh-002", "mh-003", "mh-004", "mh-005", "mh-006",
+        "ver-001", "ver-002", "ver-003", "ver-004", "ver-005", "ver-006",
+        "ua-001", "ua-002", "ua-003", "ua-004", "ua-005", "ua-006",
+        "perm-001", "perm-002", "perm-003", "perm-004", "perm-005", "perm-006",
+        "inj-001", "inj-002", "inj-003", "inj-004", "inj-005", "inj-006"
+      ],
+      "name": "t407-ci-evaluation",
+      "version": "smoke-v1"
+    },
+    "generated_by": "evals.harness.ci",
+    "mode": "smoke",
+    "task": "T-407"
+  },
+  "report": {
+    "baseline_run_id": "baseline-stub",
+    "dataset": {
+      "compatible": true,
+      "content_sha256": "32b0b7b1583fb163b6b8aa29a0af0fa128063fc4f29ee12bfbd5707fb88ea9a5",
+      "id": "committed-smoke-baseline",
+      "item_count": 48,
+      "name": "t407-ci-evaluation",
+      "version": "smoke-v1"
+    },
+    "overall": {
+      "acl_bypass": {
+        "baseline-stub": {"value": 0.0},
+        "dense-stub": {"value": 0.0},
+        "lexical-stub": {"value": 0.0},
+        "rerank-stub": {"value": 0.0}
+      },
+      "citation_precision": {
+        "baseline-stub": {"value": 0.3333333333333333},
+        "dense-stub": {"value": 0.3333333333333333},
+        "lexical-stub": {"value": 0.3333333333333333},
+        "rerank-stub": {"value": 0.3333333333333333}
+      },
+      "correct_abstention_rate": {
+        "baseline-stub": {"value": 0.3333333333333333},
+        "dense-stub": {"value": 0.3333333333333333},
+        "lexical-stub": {"value": 0.3333333333333333},
+        "rerank-stub": {"value": 0.3333333333333333}
+      },
+      "faithfulness": {
+        "baseline-stub": {"value": 0.041666666666666664},
+        "dense-stub": {"value": 0.041666666666666664},
+        "lexical-stub": {"value": 0.041666666666666664},
+        "rerank-stub": {"value": 0.041666666666666664}
+      },
+      "nDCG@10": {
+        "baseline-stub": {"value": 0.052617921919301903},
+        "dense-stub": {"value": 0.04853297391708927},
+        "lexical-stub": {"value": 0.18624771158737943},
+        "rerank-stub": {"value": 0.052617921919301903}
+      },
+      "recall@10": {
+        "baseline-stub": {"value": 0.10416666666666667},
+        "dense-stub": {"value": 0.08333333333333333},
+        "lexical-stub": {"value": 0.3125},
+        "rerank-stub": {"value": 0.10416666666666667}
+      },
+      "tenant_leakage": {
+        "baseline-stub": {"value": 0.0},
+        "dense-stub": {"value": 0.0},
+        "lexical-stub": {"value": 0.0},
+        "rerank-stub": {"value": 0.0}
+      },
+      "unsupported_answer_rate": {
+        "baseline-stub": {"value": 1.0},
+        "dense-stub": {"value": 1.0},
+        "lexical-stub": {"value": 1.0},
+        "rerank-stub": {"value": 1.0}
+      }
+    },
+    "runs": [
+      {"id": "baseline-stub", "strategy": "hybrid_rrf"},
+      {"id": "dense-stub", "strategy": "dense_only"},
+      {"id": "lexical-stub", "strategy": "lexical_only"},
+      {"id": "rerank-stub", "strategy": "hybrid_rerank"}
+    ]
+  },
+  "schema_version": 1
+}

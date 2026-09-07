@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import User
 from db.session import get_session_factory, set_tenant_context
+from domain.temporal import parse_as_of
 from evals.harness.corpus import (
     DEFAULT_MANIFEST,
     CorpusError,
@@ -31,7 +32,14 @@ from evals.harness.corpus import (
     resolve_existing_labels,
     resolve_tenant_id,
 )
-from evals.harness.metrics import EvalItem, aggregate_retrieval_metrics, load_dataset
+from evals.harness.dataset import validate_dataset
+from evals.harness.metrics import (
+    EvalItem,
+    aggregate_grouped_metrics,
+    aggregate_retrieval_metrics,
+    deduplicate_retrieved,
+    load_dataset,
+)
 from retrieval.pipeline import retrieve
 
 DEFAULT_TENANT = "acme"
@@ -69,6 +77,7 @@ async def run(args: argparse.Namespace) -> int:
         )
         return 2
 
+    validate_dataset(args.datasets, manifest_paths=(args.manifest,))
     items = load_dataset(args.datasets)
     if not items:
         print(f"no datasets found under {args.datasets}", file=sys.stderr)
@@ -105,6 +114,7 @@ async def run(args: argparse.Namespace) -> int:
         users = await _resolve_users(session, tenant_id, subjects)
 
         rows_by_slice: dict[str, list[tuple[list[str], list[str]]]] = defaultdict(list)
+        rows_by_group: list[tuple[str, str, list[str], list[str]]] = []
         # Retrieval-stage signal only. Whether the *system* abstains is decided by
         # the groundedness gate in the chat service, which this harness does not
         # exercise — do not read this as an abstention rate.
@@ -119,17 +129,21 @@ async def run(args: argparse.Namespace) -> int:
                 tenant_id=tenant_id,
                 user_id=users[subject],
                 query=item.question,
+                as_of=parse_as_of(item.as_of),
                 strategy=args.strategy,
                 top_k=args.top_k,
             )
-            retrieved_labels = [
-                version_to_label[h.document_version_id]
-                for h in result.hits
-                if h.document_version_id in version_to_label
-            ]
+            retrieved_labels = deduplicate_retrieved(
+                [
+                    version_to_label[h.document_version_id]
+                    for h in result.hits
+                    if h.document_version_id in version_to_label
+                ]
+            )
             scored = _score_item(item, retrieved_labels)
             if scored is not None:
                 rows_by_slice[item.slice].append(scored)
+                rows_by_group.append((item.slice, item.language, *scored))
             if item.should_abstain:
                 empty_retrieval_by_slice[item.slice].append(not result.hits)
             excluded = not bool(set(retrieved_labels).intersection(item.must_exclude_chunk_ids))
@@ -145,7 +159,6 @@ async def run(args: argparse.Namespace) -> int:
                     "hit": bool(set(retrieved_labels) & set(item.gold_chunk_ids)),
                     "should_abstain": item.should_abstain,
                     "retrieved_count": len(result.hits),
-                    "unsupported_as_of": item.as_of is not None,
                     "must_exclude": item.must_exclude_chunk_ids,
                     "excluded": excluded if item.must_exclude_chunk_ids else None,
                 }
@@ -179,6 +192,7 @@ async def run(args: argparse.Namespace) -> int:
             }
             for name in sorted({i.slice for i in items})
         },
+        "by_slice_language": aggregate_grouped_metrics(rows_by_group),
     }
     if args.verbose:
         report["items_detail"] = per_item

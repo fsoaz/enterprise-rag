@@ -18,6 +18,7 @@ from api.routers import (
     chat,
     collections,
     documents,
+    evals,
     feedback,
     health,
     me,
@@ -73,6 +74,7 @@ app.include_router(acl.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(feedback.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
+app.include_router(evals.router, prefix="/api/v1")
 
 
 @app.exception_handler(DomainError)
