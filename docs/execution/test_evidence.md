@@ -522,3 +522,25 @@ Documentation-only change. Each check targets one specific contradiction the rev
 | Scope | `git status` | `M README.md`, `?? docs/` — no code, config, or lockfiles |
 
 **Notes:** Still no automated tests — nothing to run against. The checks above are structural consistency verification, which is the strongest available signal for a documentation change. Mermaid rendering re-confirmed via the published artifact rather than a local renderer.
+
+## 2026-09-06 — R-070 chat transport regression (local)
+
+Base: `5e339b9`; branch `test/R-070-chat-outage`. Python 3.12.14 and
+locked dependencies restored in `/tmp/milestone-venv` because `.venv` referenced
+a missing interpreter. No model calls or paid spend (US$0). No new CI evidence.
+
+- `/tmp/milestone-venv/bin/ruff check .`: pass.
+- `/tmp/milestone-venv/bin/ruff format --check .`: 132 files pass.
+- `/tmp/milestone-venv/bin/mypy`: 65 source files pass.
+- `timeout 120s /tmp/milestone-venv/bin/pytest -q -rs` (outside sandbox):
+  83 passed, 1 skipped, 15 deselected. Existing `test_chat.py` skipped because
+  Postgres on port 15432 was unavailable; integration tests deselected.
+- New outage cases: both passed without skips; actual route, retrieval pipeline,
+  and embed error conversion exercised, with HTTP transport forced to ConnectError.
+  Auth/DB, ACL resolution, rate limit, and budget preconditions are isolated doubles.
+- Negative mutation: moved retrieval into event_stream temporarily; streaming
+  regression failed with `Caught handled exception, but response already started`.
+  Source restored and the full unit suite rerun successfully.
+- Sandbox TestClient/ASGI executions hung; outside-sandbox execution passed.
+- Deterministic unit controls run in the suite; DB authorization integration and
+  full documented security coverage are not established by this result.

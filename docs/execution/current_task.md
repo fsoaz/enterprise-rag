@@ -9,63 +9,28 @@
 
 | Field | Value |
 | --- | --- |
-| **Task** | — |
-| **File** | — |
-| **Phase** | Milestone A complete — security & correctness pass, QA round (37 findings), closing round (the 11 that remained) |
-| **Status** | idle — changes uncommitted on the working tree |
-| **Branch** | `main` (working tree on commit `104facc`) |
-| **Started** | — |
-| **Blockers** | None blocking release. Two things unmeasured rather than broken: no CI run on this tree, and no live `ANTHROPIC_API_KEY`, so answer quality is untested. |
+| Task | R-070 — chat inference outage regression |
+| File | [R-070-chat-outage.md](../tasks/R-070-chat-outage.md) |
+| Status | in_progress |
+| Branch | `test/R-070-chat-outage` |
+| Started | 2026-09-06 |
+| Base | `5e339b9` (clean before this task) |
 
-### Next step
+Milestone A remains incomplete. The July 31 QA report records 21 defects fixed,
+two intentional behaviors, and one fixed regression. Those fixes are committed;
+the July 27 handoff's uncommitted-tree statement was stale. Historical evidence
+remains in the QA reports and evidence log. No new CI run has been confirmed.
+Live generation, judging, cost, and current retrieval quality remain unmeasured.
 
-The closing round shipped OIDC sign-in, real BGE-M3 / BGE-reranker-v2-m3 weights, a
-disposable integration database, keyset pagination, multi-turn chat, PT/EN localization,
-admin document management, and a frontend test tier. That closes `IS-03`, `IS-07`, `IS-08`,
-`IS-09`, `IS-11`, `IS-12`, `IS-20`, `IS-21`, `IS-23`, `IS-24` and `IS-32` from
-[qa_report_2026-07-26.md](./qa_report_2026-07-26.md) — every finding that was still open or
-partial. Registered as R-075 → R-077, with R-059, R-061, R-071 and R-072 updated in
-[review_notes.md](./review_notes.md). Evidence: [E-008](./test_evidence.md).
+Sequence: R-070, R-030 point-in-time retrieval, T-401–T-405 evaluation foundation,
+T-406–T-409 comparisons/CI/experiments (including R-031), then release demonstration.
+Full eight-slice evaluation is required. Paid generation, judging, and expansion
+share a cumulative US$25 ceiling; no recurring nightly spend is authorized.
+Use disposable databases and keep deterministic and real-model evidence separate.
 
-Next work, highest value first:
-
-1. **Commit and push, then confirm CI.** None of this has run in GitHub Actions. R-059 and R-061 were failures seen *only* in CI, so they are recorded as `resolved (local)` and stay that way until Actions is green on this commit. First because it is the step that can invalidate the two claims above it.
-2. **Set a real `ANTHROPIC_API_KEY`.** Still the only way to fill the answer-quality, latency, cost and injection-success columns — all `n/m`, and all of what remains of Milestone A's exit criteria.
-3. **Re-measure retrieval against real weights.** The embedder changed, so every retrieval number in [E-007](./test_evidence.md) is superseded rather than a baseline. Needs a `--load-corpus` run on a reset database.
-4. **Finish R-070.** Two of its three named gaps are closed by frontend tests. The third is not: nothing drives `/chat/completions` with inference unreachable and asserts `503 retrieval-unavailable` — `test_chat.py` *tolerates* 503 in a status set rather than requiring it, which is the same "asserts the wrong thing" shape the finding is about.
-5. **Close R-031** — wire the eval harness into CI. The OpenAPI and generated-types drift checks now run in `typecheck` and `web-test` runs Vitest, so the eval gate is the only remaining hole in the CI table.
-6. **Close R-030** — retrieval has no `as_of` filter, so as-of-date questions cannot be answered.
-7. **Rewrite `0001_initial` as explicit DDL.** It still uses `Base.metadata.create_all()`, so every model-level index change silently rewrites released migration history. `IF NOT EXISTS` in 0002/0003 contains the symptom; this removes the cause (R-058).
-8. Begin Milestone B only after A is demoed.
-
-### Notes
-
-Unit **74 passed, 1 skipped, 14 deselected**; integration **11 passed, 3 skipped**;
-frontend **9 passed** at 72.31% statements ([E-008](./test_evidence.md)). All local, with
-mypy, ruff, import-linter, biome, tsc, `next build`, `make openapi-check` and compose
-validation green. **There is no CI result for this tree** — the last recorded CI run is
-[E-005](./test_evidence.md), against an older commit. Always state the environment and the
-skip count.
-
-**Retrieval: no current number is quotable.** The `recall@10 = 0.909` figure quoted in an
-earlier revision of this file did not reproduce; re-measured on 2026-07-26 it was overall
-**0.364**, `crosslingual` **0.000**. That measurement was itself taken under stub
-embeddings, and the embedder has since been replaced with real BGE-M3 — so it is
-superseded too, in the pessimistic direction. Quote neither. Quote no retrieval number that
-was not produced by a `--load-corpus` run on a reset database with the current backend.
-
-Five rules came out of these passes and are now ADRs: thresholds compare **normalized**
-values, never raw scores ([ADR-010](../context/architecture.md#adr-010--thresholds-compare-normalized-values-never-raw-scores));
-a signal nothing reads is **not a control** ([ADR-011](../context/architecture.md#adr-011--a-signal-that-nothing-reads-is-not-a-control));
-degraded-mode evidence is lexical or it does not exist ([ADR-012](../context/architecture.md#adr-012--degraded-mode-evidence-is-lexical-or-it-does-not-exist));
-the browser never holds a token ([ADR-013](../context/architecture.md#adr-013--the-browser-never-holds-a-token));
-and pagination cursors encode a position, not an offset ([ADR-014](../context/architecture.md#adr-014--pagination-cursors-encode-a-position-not-an-offset)).
-
-A sixth pattern is a recurring theme rather than an ADR: **the convenient failure mode is
-usually the wrong one** (R-015, R-016, R-058, R-071, R-075). An embedder without weights
-falling back to hashes, a suite using whatever database is configured, a migration skipping
-an object it assumes exists — each keeps the system working, and that is the problem. When
-a required dependency is missing, fail at startup and name it.
+R-058's mutable `0001_initial` remains a separate migration-history concern.
+Do not rewrite released migrations as part of this work. Release readiness requires
+all exit criteria to have measured evidence; unmet criteria remain blockers.
 
 ---
 

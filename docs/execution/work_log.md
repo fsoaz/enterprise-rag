@@ -464,3 +464,10 @@ Documentation review only; no tests exist yet. See [test_evidence.md](./test_evi
 ### Follow-ups
 
 Four open questions are recorded in [product.md § 10](../context/product.md#10-open-questions) and scheduled for resolution: Q-1 and Q-2 by experiment in Phase 4, Q-3 and Q-4 as product decisions in Phases 3 and 6.
+
+## 2026-09-06 — R-070 local implementation
+
+Reconciled stale handoff against committed July 31 QA remediation. Added strict
+JSON/SSE chat transport-outage tests; negative stream-order mutation detected.
+Ruff, formatting, mypy, and unit suite pass (83 passed, 1 skipped, 15 deselected).
+No release completion or CI claim; full scope and US$25 ceiling remain unchanged.
