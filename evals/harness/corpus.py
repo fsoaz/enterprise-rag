@@ -10,8 +10,7 @@ Idempotent: re-running replaces the chunks for each version in place.
 
 from __future__ import annotations
 
-import json
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -35,6 +34,7 @@ from domain.types import (
     AclSubjectType,
     ParseStatus,
 )
+from evals.harness.manifest import CorpusError, read_manifest
 from worker.pipeline.chunk import chunk_document
 from worker.pipeline.embed import embed_passages, embedding_model_meta
 from worker.pipeline.index import index_chunks_search_vectors
@@ -43,10 +43,6 @@ from worker.pipeline.parse import parse_bytes
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPO_ROOT / "evals" / "corpus.json"
 FIXTURE_DIR = REPO_ROOT / "evals" / "fixtures"
-
-
-class CorpusError(RuntimeError):
-    """Raised when the corpus cannot be loaded or resolved."""
 
 
 def _parse_ts(raw: str | None) -> datetime | None:
@@ -177,7 +173,7 @@ async def resolve_existing_labels(
     tenant_id: UUID,
 ) -> dict[str, UUID]:
     """Map labels to already-loaded version IDs without touching the corpus."""
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = read_manifest(manifest_path, fixture_dir=FIXTURE_DIR)
     labels: dict[str, UUID] = {}
     for doc_spec in manifest["documents"]:
         document_id = await session.scalar(
@@ -207,7 +203,10 @@ async def load_corpus(
     tenant_id: UUID,
 ) -> dict[str, UUID]:
     """Materialise the manifest and return ``label -> document_version_id``."""
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = read_manifest(manifest_path, fixture_dir=FIXTURE_DIR)
+    actual_tenant = await session.scalar(select(Tenant.slug).where(Tenant.id == tenant_id))
+    if actual_tenant != manifest["tenant"]:
+        raise CorpusError("manifest tenant does not match target tenant")
     collection_ids: dict[str, UUID] = {}
     for spec in manifest["collections"]:
         collection_ids[str(spec["name"])] = await _ensure_collection(session, tenant_id, spec)
@@ -251,15 +250,21 @@ async def load_corpus(
                     tenant_id=tenant_id,
                     document_id=document.id,
                     version_no=version_no,
-                    content_sha256=f"eval-{label}",
-                    storage_key=f"evals/fixtures/{fixture.name}",
+                    content_sha256=ver_spec["source_sha256"],
+                    storage_key=f"evals/fixtures/{ver_spec['fixture']}",
                     mime_type="text/markdown",
-                    effective_from=_parse_ts(ver_spec.get("effective_from")) or datetime.now(UTC),
+                    effective_from=_parse_ts(ver_spec["effective_from"]),
                     parse_status=ParseStatus.PENDING.value,
                 )
                 session.add(version)
                 await session.flush()
-            # `current` drives effective_to: retrieval only sees the open version.
+            elif version.content_sha256 != ver_spec["source_sha256"]:
+                raise CorpusError(
+                    f"source changed for loaded version {label}; use a fresh database"
+                )
+            version.content_sha256 = ver_spec["source_sha256"]
+            version.effective_from = datetime.fromisoformat(ver_spec["effective_from"])
+            # Explicit intervals keep reset snapshots independent of wall-clock time.
             version.effective_to = (
                 None if ver_spec.get("current") else _parse_ts(ver_spec.get("effective_to"))
             )

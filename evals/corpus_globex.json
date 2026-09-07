@@ -1,0 +1,694 @@
+{
+  "schema_version": 1,
+  "tenant": "globex",
+  "collections": [
+    {
+      "name": "Globex Evaluation Operations",
+      "read_groups": [
+        "ops"
+      ]
+    }
+  ],
+  "documents": [
+    {
+      "title": "Aster — Laboratory freezer alarms",
+      "scenario_id": "aster",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-aster-policy-v1",
+          "fixture": "globex/globex-aster-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "472761d8966c8d4eb1cfdc3b8927aa265a72a56d6958114975c65f747135f340"
+        }
+      ]
+    },
+    {
+      "title": "Bambu — Empréstimo de instrumentos",
+      "scenario_id": "bambu",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-bambu-policy-v1",
+          "fixture": "globex/globex-bambu-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "c692742df45410bf24f8d8e34e26e932b9000e4c66f7aafc172467bab7f79933"
+        }
+      ]
+    },
+    {
+      "title": "Cobalt — Build artifact retention",
+      "scenario_id": "cobalt",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-cobalt-policy-v1",
+          "fixture": "globex/globex-cobalt-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "83b7c00cd801ac86b3d02bf9be50e9d8d1b68f22eb7bce93320691333c1e6fde"
+        }
+      ]
+    },
+    {
+      "title": "Dalia — Agendamento de docas",
+      "scenario_id": "dalia",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-dalia-policy-v1",
+          "fixture": "globex/globex-dalia-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "dd0e8262cbf70013244796e7ecca6ecb3e5e2048f7abaafa11161833504fd87f"
+        }
+      ]
+    },
+    {
+      "title": "Ember — Workshop ventilation",
+      "scenario_id": "ember",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-ember-policy-v1",
+          "fixture": "globex/globex-ember-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "ff36b3a99796f7417cf050535ac57e9f1f63b1ef0a0b487bc255f8a41beab216"
+        }
+      ]
+    },
+    {
+      "title": "Figueira — Revisão de traduções",
+      "scenario_id": "figueira",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-figueira-policy-v1",
+          "fixture": "globex/globex-figueira-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "f1fe1978f8e10cd03f15863d4a722e521d4d75f5ba9c76c1ee3d821b10860be6"
+        }
+      ]
+    },
+    {
+      "title": "Garnet — Test bench reservations",
+      "scenario_id": "garnet",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-garnet-policy-v1",
+          "fixture": "globex/globex-garnet-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "d81fefedd573416b7426b7869296d1c3d44cda33d879a1d466d3efdc17f23c7b"
+        }
+      ]
+    },
+    {
+      "title": "Hortensia — Expedição de amostras",
+      "scenario_id": "hortensia",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-hortensia-policy-v1",
+          "fixture": "globex/globex-hortensia-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "3c733cdb4b8db3fe19868c1f713517c31d8062f69c5550d851df0720ea0fe486"
+        }
+      ]
+    },
+    {
+      "title": "Indigo — Simulation checkpoints",
+      "scenario_id": "indigo",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-indigo-policy-v1",
+          "fixture": "globex/globex-indigo-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "fd01970b4fb333d79974bd4abcc66acb2180bab7f14111e6af35a703606918b3"
+        }
+      ]
+    },
+    {
+      "title": "Jatoba — Inspeção de empilhadeiras",
+      "scenario_id": "jatoba",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-jatoba-policy-v1",
+          "fixture": "globex/globex-jatoba-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "a9c592cf0b79c1ea1c93958638c6a33fecbfa5731b631ed0377dce9759c5f95d"
+        }
+      ]
+    },
+    {
+      "title": "Kestrel — Dataset labeling reviews",
+      "scenario_id": "kestrel",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-kestrel-policy-v1",
+          "fixture": "globex/globex-kestrel-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "53690cd41a6a71d726a455195e5a93142c0e2ccd8a605af2937cd843097b3a93"
+        }
+      ]
+    },
+    {
+      "title": "Lirio — Acesso a protótipos",
+      "scenario_id": "lirio",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-lirio-policy-v1",
+          "fixture": "globex/globex-lirio-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "fafcaf52eb451d8973018b6402730d514ef0dc300aabefac410766593a3f8fb8"
+        }
+      ]
+    },
+    {
+      "title": "Marble — Instrument warm-up",
+      "scenario_id": "marble",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-marble-policy-v1",
+          "fixture": "globex/globex-marble-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "82de35e0bfb5e41b8bac1e7a4635f3bf94cdbf5ddba640237eca9bf5029f4979"
+        }
+      ]
+    },
+    {
+      "title": "Nectarina — Digitalização de cadernos",
+      "scenario_id": "nectarina",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-nectarina-policy-v1",
+          "fixture": "globex/globex-nectarina-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "605873051014422ee4ed52e750845ee181184535928737de0f704d8d348fbfb6"
+        }
+      ]
+    },
+    {
+      "title": "Opal — Spare battery rotation",
+      "scenario_id": "opal",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-opal-policy-v1",
+          "fixture": "globex/globex-opal-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "22c1ab971a1352be5797308ee4d23ae0352d04c2957f458d9ccde0ca50e906bf"
+        }
+      ]
+    },
+    {
+      "title": "Pitangueira — Inscrição em treinamentos",
+      "scenario_id": "pitangueira",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-pitangueira-policy-v1",
+          "fixture": "globex/globex-pitangueira-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "5600adf6a2d9e98bbef6a798e3f1e38b7dd0ae814b9bfb3dae188632daeec786"
+        }
+      ]
+    },
+    {
+      "title": "Quartz — Map tile publication",
+      "scenario_id": "quartz",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-quartz-policy-v1",
+          "fixture": "globex/globex-quartz-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "21b3a87ad9ee793acb46d33a289c62b1969b429e179248a66124382648aeac02"
+        }
+      ]
+    },
+    {
+      "title": "Romanzeira — Separação de embalagens",
+      "scenario_id": "romanzeira",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-romanzeira-policy-v1",
+          "fixture": "globex/globex-romanzeira-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "8f0c4e8415acba6e0f9beee5379527009ba00de392e56c08ac952a5acac40dfd"
+        }
+      ]
+    },
+    {
+      "title": "Saffron — Acoustic room booking",
+      "scenario_id": "saffron",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-saffron-policy-v1",
+          "fixture": "globex/globex-saffron-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "fa7980a3af399f8289e6fb9c1d51bcc63404d23992adaf9e0e91a21cd541c7c6"
+        }
+      ]
+    },
+    {
+      "title": "Tamarindo — Conferência de inventário",
+      "scenario_id": "tamarindo",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-tamarindo-policy-v1",
+          "fixture": "globex/globex-tamarindo-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "1482ea78326f2abe03adb419ac3d05e3d0e8d0c78fe31f2e9aa75a12388cb3aa"
+        }
+      ]
+    },
+    {
+      "title": "Umber — Mechanical drawing approval",
+      "scenario_id": "umber",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-umber-policy-v1",
+          "fixture": "globex/globex-umber-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "74bc6b6bcd42b4804f7dd5d1b4541df5643bd0b1a50e80255584017d6792f616"
+        }
+      ]
+    },
+    {
+      "title": "Violeta — Reserva de salas de montagem",
+      "scenario_id": "violeta",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-violeta-policy-v1",
+          "fixture": "globex/globex-violeta-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "ef6d0fd1d95076771218f3cc1e6fc47b9df085e98cfcd57c20d2c94652e3f84a"
+        }
+      ]
+    },
+    {
+      "title": "Willow — Data export packaging",
+      "scenario_id": "willow",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-willow-policy-v1",
+          "fixture": "globex/globex-willow-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "d3a7c57cfb7c425f6e18d5a0cf736265750abffdf2b9f52d4739c389011e68ca"
+        }
+      ]
+    },
+    {
+      "title": "Xique — Troca de etiquetas térmicas",
+      "scenario_id": "xique",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-xique-policy-v1",
+          "fixture": "globex/globex-xique-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "1e9d15a1b40dd0a43bfd4fb0824748d1fedd75f357d0e38e3c99555c33b221e1"
+        }
+      ]
+    },
+    {
+      "title": "Yarrow — Robotic cell handover",
+      "scenario_id": "yarrow",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-yarrow-policy-v1",
+          "fixture": "globex/globex-yarrow-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "3260a3ddf1086299dd3f6e2e56b8dc112beb923228b0c1160eea8026d9235a07"
+        }
+      ]
+    },
+    {
+      "title": "Zinnia — Conservação de moldes",
+      "scenario_id": "zinnia",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-zinnia-policy-v1",
+          "fixture": "globex/globex-zinnia-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "5fcec3df36cd1945219fb544e8ef29b1916ec091b37ade5d4bb4b70804ae5df1"
+        }
+      ]
+    },
+    {
+      "title": "Alder — Thermal camera loans",
+      "scenario_id": "alder",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-alder-policy-v1",
+          "fixture": "globex/globex-alder-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "3ade7f378a1f8f325ad5503754a914a667b4d4126430cd17536e4065721eb728"
+        }
+      ]
+    },
+    {
+      "title": "Begonia — Revisão de diagramas elétricos",
+      "scenario_id": "begonia",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-begonia-policy-v1",
+          "fixture": "globex/globex-begonia-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "ecfb0b3197c3799686da919db8ab311489cbc3602f0785decd1f5ac631f82e59"
+        }
+      ]
+    },
+    {
+      "title": "Cedar — Sample archive retrieval",
+      "scenario_id": "cedar",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-cedar-policy-v1",
+          "fixture": "globex/globex-cedar-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "4e5ec05f508fb5ca3e5abca2277a9bc070fe48c4a2fecaaf172a78295ec4d1bf"
+        }
+      ]
+    },
+    {
+      "title": "Dende — Distribuição de kits de campo",
+      "scenario_id": "dende",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-dende-policy-v1",
+          "fixture": "globex/globex-dende-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "a8bd85153df62c2bdcd669d7dc9d904f6011c1dd7a36443ac354dcd71f89a8b4"
+        }
+      ]
+    },
+    {
+      "title": "Elm — Firmware qualification",
+      "scenario_id": "elm",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-elm-policy-v1",
+          "fixture": "globex/globex-elm-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "de4ec28ba884f02f156c75b75608bc8807a28a354d14867e84965b7e8cd4f5bd"
+        }
+      ]
+    },
+    {
+      "title": "Freixo — Triagem de peças retornadas",
+      "scenario_id": "freixo",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-freixo-policy-v1",
+          "fixture": "globex/globex-freixo-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "55776eac5fe7f53e651449a04ef381d8e0cdab8b9883aeb7796db5a9b684a24c"
+        }
+      ]
+    },
+    {
+      "title": "Gorse — Demonstration equipment packing",
+      "scenario_id": "gorse",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-gorse-policy-v1",
+          "fixture": "globex/globex-gorse-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "a99c94e9f6258402c951bbca9bf25d0a458f8861dfbbe3e8773520404acb0283"
+        }
+      ]
+    },
+    {
+      "title": "Hibisco — Preparação de bancadas didáticas",
+      "scenario_id": "hibisco",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-hibisco-policy-v1",
+          "fixture": "globex/globex-hibisco-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "4f409ac79b4530512bee5ffc82bd6108f148f88c0c62a46876f0d86c6ff89b6d"
+        }
+      ]
+    },
+    {
+      "title": "Iris — Optical alignment checks",
+      "scenario_id": "iris",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-iris-policy-v1",
+          "fixture": "globex/globex-iris-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "37b27f3911d41168043fe7deb61ffcc879bec1b9e273f1caec0987d0707dbf21"
+        }
+      ]
+    },
+    {
+      "title": "Junco — Validação de relatórios de ensaio",
+      "scenario_id": "junco",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-junco-policy-v1",
+          "fixture": "globex/globex-junco-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "f6155471df6ab9cd7effb8b91bd6b2898d0da980fd4aef6d7f181f3fc1b6960e"
+        }
+      ]
+    },
+    {
+      "title": "Kelp — Marine sensor storage",
+      "scenario_id": "kelp",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-kelp-policy-v1",
+          "fixture": "globex/globex-kelp-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "3af531ae73b99d7adf1d0cec129f135209d02956748ebb5450d5efdf9e996e32"
+        }
+      ]
+    },
+    {
+      "title": "Lotus — Controle de painéis de demonstração",
+      "scenario_id": "lotus",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-lotus-policy-v1",
+          "fixture": "globex/globex-lotus-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "12314e311ac44ae0ff19c2b4031147fdbcb99d964f5890b66b38bbc8f980ee5e"
+        }
+      ]
+    },
+    {
+      "title": "Moss — Portable recorder checkout",
+      "scenario_id": "moss",
+      "kind": "policy",
+      "language": "en",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-moss-policy-v1",
+          "fixture": "globex/globex-moss-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "ef4539397caebbc12307d084f3c4fb3d52a0f55a54ae0c76b68dbd8bcbfbba2e"
+        }
+      ]
+    },
+    {
+      "title": "Nogueira — Organização de arquivos vetoriais",
+      "scenario_id": "nogueira",
+      "kind": "policy",
+      "language": "pt",
+      "collection": "Globex Evaluation Operations",
+      "versions": [
+        {
+          "label": "globex-nogueira-policy-v1",
+          "fixture": "globex/globex-nogueira-policy-v1.md",
+          "current": true,
+          "effective_from": "2024-01-01T00:00:00Z",
+          "effective_to": null,
+          "source_sha256": "4bd93669c857ce5afda51499d598f8cff88ada47a57908073aa45ab7fcf06b8e"
+        }
+      ]
+    }
+  ]
+}

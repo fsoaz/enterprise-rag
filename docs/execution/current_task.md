@@ -9,12 +9,12 @@
 
 | Field | Value |
 | --- | --- |
-| Task | R-030 — point-in-time retrieval |
-| File | [R-030-point-in-time.md](../tasks/R-030-point-in-time.md) |
+| Task | T-401 — synthetic fixture corpus |
+| File | [T-401-fixture-corpus.md](../tasks/T-401-fixture-corpus.md) |
 | Status | implemented locally; awaiting review and CI |
-| Branch | `feat/R-030-point-in-time` |
+| Branch | `feat/T-401-fixture-corpus` |
 | Started | 2026-09-06 |
-| Base | `5e339b9` (clean before this task) |
+| Base | `3a64aab` (clean before this task) |
 
 Milestone A remains incomplete. The July 31 QA report records 21 defects fixed,
 two intentional behaviors, and one fixed regression. Those fixes are committed;
@@ -22,8 +22,8 @@ the July 27 handoff's uncommitted-tree statement was stale. Historical evidence
 remains in the QA reports and evidence log. No new CI run has been confirmed.
 Live generation, judging, cost, and current retrieval quality remain unmeasured.
 
-R-070 and R-030 are implemented locally on stacked task branches; see the
-2026-09-06 evidence entries. Remaining sequence: T-401–T-405 evaluation foundation,
+R-070, R-030, and T-401 are implemented locally on stacked task branches; see the
+dated evidence entries. Remaining sequence: T-402–T-405 evaluation foundation,
 T-406–T-409 comparisons/CI/experiments (including R-031), then release demonstration.
 Full eight-slice evaluation is required. Paid generation, judging, and expansion
 share a cumulative US$25 ceiling; no recurring nightly spend is authorized.

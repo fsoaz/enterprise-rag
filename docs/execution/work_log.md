@@ -479,3 +479,13 @@ retrieval arms and evaluation dates. Exact historical citations and current
 security controls verified on disposable Postgres under all four strategies.
 Regenerated contracts/types. Full Phase 4, R-031, experiments and release
 evaluation are still unimplemented; Milestone A is not complete.
+
+## 2026-09-07 — T-401 local implementation
+
+Added a reproducible synthetic source catalog and renderer: 40 bilingual operational
+scenarios, dated policy revisions, routing and restricted records, eight balanced
+attack families, and 40 conflicting Globex counterparts. Added strict manifest
+validation for hashes, safe paths, intervals, tenant groups, labels, and privacy.
+Renderer, parser/chunker, manifest tests, Ruff, and mypy pass. Full suite: 122
+passed, 1 existing dependency skip, 19 integration deselections. No paid calls or
+CI evidence; database load remains for the evaluation foundation tasks.

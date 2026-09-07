@@ -576,3 +576,26 @@ allowance used US$0 of US$25. No CI result or real-model quality/latency claim.
 - Initial interval test failed due to a duplicate SQL table reference in its
   SQLite fixture; corrected and rerun. No production defect was masked.
 - Broader service integration, CI, Phase 4 and live release evidence remain pending.
+
+## 2026-09-07 — T-401 synthetic corpus (local)
+
+Branch: `feat/T-401-fixture-corpus`, based on `3a64aab`. No paid model calls
+(US$0 of the US$25 allowance), no CI result, and no quality metrics claimed.
+
+- `python -m evals.build_corpus --check`: verified 247 deterministic artifacts.
+- `read_manifest` validates `evals/corpus.json` (170 documents, 211 versions) and
+  `evals/corpus_globex.json` (40 documents, 40 versions). Acme contains 40 policy,
+  40 routing, 40 restricted, and 40 attack documents; attacks cover all eight
+  documented families in five PT/EN-balanced cases each. Globex has 40 conflicting
+  policy counterparts. Existing six legacy source versions remain available.
+- Every manifest fixture passed UTF-8, SHA-256, safe-path, privacy, and exactly-one-
+  current-version validation. Every referenced fixture parses and produces chunks
+  through the existing worker parser/chunker.
+- Manifest, privacy, reproducibility, and existing metrics tests: 8 passed.
+- Full deterministic suite: 122 passed, 1 skipped because the existing chat test's
+  default Postgres service on port 15432 was unavailable, 19 integration tests
+  deselected by the repository default. No new test was skipped.
+- Ruff check/format and mypy passed. No migration, API contract, production default,
+  or evaluation baseline changed. Loading both tenants into disposable Postgres and
+  worker embeddings is deferred to the evaluation database task; live quality remains
+  unmeasured.
