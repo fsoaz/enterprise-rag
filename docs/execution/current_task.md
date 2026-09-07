@@ -9,10 +9,10 @@
 
 | Field | Value |
 | --- | --- |
-| Task | T-402 — golden dataset authoring |
-| File | [T-402-golden-dataset.md](../tasks/T-402-golden-dataset.md) |
+| Task | T-403 — retrieval metrics |
+| File | [T-403-retrieval-metrics.md](../tasks/T-403-retrieval-metrics.md) |
 | Status | implemented locally; awaiting review and CI |
-| Branch | `feat/T-402-golden-dataset` |
+| Branch | `feat/T-403-retrieval-metrics` |
 | Started | 2026-09-06 |
 | Base | `3a64aab` (clean before this task) |
 
@@ -23,7 +23,8 @@ remains in the QA reports and evidence log. No new CI run has been confirmed.
 Live generation, judging, cost, and current retrieval quality remain unmeasured.
 
 R-070, R-030, T-401, and T-402 are implemented locally on stacked task branches;
-see the dated evidence entries. Remaining sequence: T-403–T-405 evaluation foundation,
+T-403 is now implemented locally; see the dated evidence entries. Remaining sequence:
+T-404–T-405 evaluation foundation,
 T-406–T-409 comparisons/CI/experiments (including R-031), then release demonstration.
 Full eight-slice evaluation is required. Paid generation, judging, and expansion
 share a cumulative US$25 ceiling; no recurring nightly spend is authorized.

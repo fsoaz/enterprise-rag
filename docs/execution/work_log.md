@@ -497,3 +497,11 @@ Generated the eight immutable golden JSONL slices from the T-401 catalog, exactl
 version boundary/current/absent cases, acting users, prohibited sources, and
 abstention expectations. Dataset validation and reproducibility checks pass; no
 model calls, CI result, or quality score was produced.
+
+## 2026-09-07 — T-403 local implementation
+
+Completed retrieval metrics with precision@10, explicit empty-gold behavior,
+duplicate-version collapse, and per-slice/language aggregation. The production
+harness validates the dataset before retrieval and deduplicates mapped version
+labels before scoring. Focused tests, Ruff, and mypy pass; no quality baseline or
+real-model result was changed.

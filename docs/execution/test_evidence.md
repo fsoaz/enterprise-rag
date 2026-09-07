@@ -614,4 +614,17 @@ Branch: `feat/T-402-golden-dataset`, based on `3404dc5`. No paid model calls
   prohibited-source labels. Every source label resolves to T-401 manifests.
 - Dataset, manifest, privacy, reproducibility, and metrics tests: 10 passed.
 - Ruff check/format and mypy pass. Full suite remains to be rerun after this
-  task's final edits; integration and live model execution remain separate work.
+task's final edits; integration and live model execution remain separate work.
+
+## 2026-09-07 — T-403 retrieval metrics (local)
+
+Branch: `feat/T-403-retrieval-metrics`, based on `95b52b3`. No paid model calls
+(US$0 of the US$25 allowance), no CI result, and no semantic quality claim.
+
+- Added precision@10, explicit empty-gold semantics, duplicate mapped-version
+  collapse, and grouped slice/language metrics. The live harness now validates
+  all dataset slices and source labels before opening a database session.
+- Focused metrics/dataset/manifest tests: 13 tests pass (the
+  combined Phase 4 foundation checks remain deterministic).
+- Ruff check/format and mypy pass. Full suite is to be rerun after commit; no
+  baseline, model identity, or production retrieval default changed.
