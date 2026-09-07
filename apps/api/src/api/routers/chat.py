@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from datetime import date, datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import JSONResponse, StreamingResponse
@@ -18,6 +19,7 @@ from api.services.chat import run_chat
 from api.settings import Settings, get_settings
 from db.models import Query, QueryCitation
 from domain.errors import NotFoundError
+from domain.temporal import parse_as_of
 from domain.types import RetrievalStrategy
 from llm.client import ConversationMessage
 from retrieval.pipeline import retrieve
@@ -35,6 +37,9 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    as_of: Annotated[
+        datetime | None, BeforeValidator(parse_as_of, json_schema_input_type=date | datetime | None)
+    ] = None
     model_config = ConfigDict(str_strip_whitespace=True)
 
     question: str | None = Field(default=None, min_length=1, max_length=8000)
@@ -237,6 +242,7 @@ async def chat_completions(
         user_id=user.id,
         query=question,
         strategy=RetrievalStrategy(body.strategy),
+        as_of=body.as_of,
     )
 
     async def event_stream() -> AsyncIterator[str]:
@@ -247,6 +253,7 @@ async def chat_completions(
             question=question,
             conversation_history=history,
             strategy=RetrievalStrategy(body.strategy),
+            as_of=body.as_of,
             anthropic_api_key=settings.anthropic_api_key,
             stream=body.stream,
             retrieval_result=retrieval,
@@ -262,6 +269,7 @@ async def chat_completions(
             question=question,
             conversation_history=history,
             strategy=RetrievalStrategy(body.strategy),
+            as_of=body.as_of,
             anthropic_api_key=settings.anthropic_api_key,
             stream=False,
             retrieval_result=retrieval,

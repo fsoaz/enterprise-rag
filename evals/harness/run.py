@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import User
 from db.session import get_session_factory, set_tenant_context
+from domain.temporal import parse_as_of
 from evals.harness.corpus import (
     DEFAULT_MANIFEST,
     CorpusError,
@@ -119,6 +120,7 @@ async def run(args: argparse.Namespace) -> int:
                 tenant_id=tenant_id,
                 user_id=users[subject],
                 query=item.question,
+                as_of=parse_as_of(item.as_of),
                 strategy=args.strategy,
                 top_k=args.top_k,
             )
@@ -145,7 +147,6 @@ async def run(args: argparse.Namespace) -> int:
                     "hit": bool(set(retrieved_labels) & set(item.gold_chunk_ids)),
                     "should_abstain": item.should_abstain,
                     "retrieved_count": len(result.hits),
-                    "unsupported_as_of": item.as_of is not None,
                     "must_exclude": item.must_exclude_chunk_ids,
                     "excluded": excluded if item.must_exclude_chunk_ids else None,
                 }

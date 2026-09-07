@@ -264,3 +264,13 @@ Applied to every PR, in addition to whatever the diff itself suggests. Ordered b
 **Evidence that overstates** *(R-018, R-028)* — "35 passed" counted skips as passes, "RLS isolation tests green" described tests that had not run, and the eval harness reported 1.0 on metrics it never computed. Related to the earlier *unverifiable claims* theme but distinct: these were not unfalsifiable assertions, they were measurements of the wrong thing. **A number in the evidence log states what was measured, under what environment, and what did not run.**
 
 **The convenient failure mode is usually the wrong one** *(R-015, R-016, R-058, R-071, R-075)* — five findings where the easy behavior and the correct behavior pointed in opposite directions, and the easy one was silent. An embedder without weights that falls back to hashes; a test suite that uses whatever database is configured; a migration that skips an object it thinks already exists; a stub that invents a ranking. Each choice makes the system keep working, and that is precisely the problem: **the cost of the convenient path is paid later, by someone reading a number that was never real.** Distinct from *fabricating instead of abstaining*, which was about placeholders — this is about what production code does when a real dependency is missing. The rule that follows: **when a required dependency is absent, fail at startup and name what is missing.** A degraded path is legitimate only when it is designed, documented, and produces output labelled as degraded — as the no-key answer path is under [ADR-012](../context/architecture.md#adr-012--degraded-mode-evidence-is-lexical-or-it-does-not-exist). Where an environment genuinely may differ, make the choice explicit and validated on both sides, so neither production nor CI can select the other's profile by accident.
+
+### 2026-09-06 local follow-up — R-070 and R-030
+
+R-070 strict JSON/SSE transport outage regression is implemented locally; the
+stream-order negative mutation fails as required. R-030 point-in-time filtering
+is implemented with UTC input validation, both arms and lexical evidence, direct
+chat callers, and dataset propagation. Four Postgres strategy tests pass, including
+current security controls and historical citation IDs. See dated test_evidence.md
+entries. Both await review/CI; historical findings above remain as recorded.
+R-031 and Phase 4 remain open. Mutable 0001 remains a separate R-058 follow-up.

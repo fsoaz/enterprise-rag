@@ -501,6 +501,8 @@ export interface components {
     };
     /** ChatRequest */
     ChatRequest: {
+      /** As Of */
+      as_of?: string | null;
       /** Question */
       question?: string | null;
       /** Messages */
@@ -870,6 +872,8 @@ export interface components {
     };
     /** SearchRequest */
     SearchRequest: {
+      /** As Of */
+      as_of?: string | null;
       /** Query */
       query: string;
       /**

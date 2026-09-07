@@ -471,3 +471,11 @@ Reconciled stale handoff against committed July 31 QA remediation. Added strict
 JSON/SSE chat transport-outage tests; negative stream-order mutation detected.
 Ruff, formatting, mypy, and unit suite pass (83 passed, 1 skipped, 15 deselected).
 No release completion or CI claim; full scope and US$25 ceiling remain unchanged.
+
+## 2026-09-06 — R-030 local implementation
+
+Added shared UTC parsing and half-open version filtering through search, chat,
+retrieval arms and evaluation dates. Exact historical citations and current
+security controls verified on disposable Postgres under all four strategies.
+Regenerated contracts/types. Full Phase 4, R-031, experiments and release
+evaluation are still unimplemented; Milestone A is not complete.

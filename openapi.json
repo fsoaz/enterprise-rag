@@ -2266,6 +2266,22 @@
       },
       "ChatRequest": {
         "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
           "question": {
             "anyOf": [
               {
@@ -3197,6 +3213,22 @@
       },
       "SearchRequest": {
         "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
           "query": {
             "type": "string",
             "maxLength": 4000,

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps.db import get_db_session
 from api.deps.limits import SearchRateLimited
+from domain.temporal import parse_as_of
 from domain.types import DEFAULT_TOP_K_RERANK, RetrievalStrategy
 from retrieval.pipeline import retrieve
 
@@ -20,6 +22,9 @@ StrategyLiteral = Literal["dense_only", "lexical_only", "hybrid_rrf", "hybrid_re
 
 
 class SearchRequest(BaseModel):
+    as_of: Annotated[
+        datetime | None, BeforeValidator(parse_as_of, json_schema_input_type=date | datetime | None)
+    ] = None
     query: str = Field(min_length=1, max_length=4000)
     strategy: StrategyLiteral = "hybrid_rrf"
     top_k: int = Field(default=DEFAULT_TOP_K_RERANK, ge=1, le=50)
@@ -51,6 +56,7 @@ async def search(
         user_id=user.id,
         query=body.query,
         strategy=RetrievalStrategy(body.strategy),
+        as_of=body.as_of,
         top_k=body.top_k,
     )
     return SearchResponse(

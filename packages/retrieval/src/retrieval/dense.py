@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -13,6 +14,7 @@ from db.models import Chunk, ChunkEmbedding, Document, DocumentVersion
 from domain.embeddings import embedding_model_meta
 from domain.types import DEFAULT_TOP_K_RETRIEVAL, INJECTION_RISK_BLOCK
 from retrieval.acl import AclResolution, document_acl_predicate
+from retrieval.temporal import version_predicate
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,7 @@ async def dense_search(
     tenant_id: UUID,
     query_vector: list[float],
     acl: AclResolution,
+    as_of: datetime | None = None,
     top_k: int = DEFAULT_TOP_K_RETRIEVAL,
 ) -> list[DenseHit]:
     model_name, model_version = embedding_model_meta()
@@ -56,7 +59,7 @@ async def dense_search(
             ChunkEmbedding.tenant_id == tenant_id,
             ChunkEmbedding.model_name == model_name,
             ChunkEmbedding.model_version == model_version,
-            DocumentVersion.effective_to.is_(None),
+            version_predicate(as_of),
             Document.archived_at.is_(None),
             Document.erased_at.is_(None),
             Chunk.injection_risk < INJECTION_RISK_BLOCK,

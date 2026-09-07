@@ -1,6 +1,6 @@
 # R-070 — Guard chat inference outages
 
-- Status: in_progress
+- Status: implemented locally; awaiting review and CI
 - Branch: `test/R-070-chat-outage`
 - Scope: actual chat route and retrieval pipeline under inference transport failure.
 - Acceptance: streaming and JSON return exactly 503, application/problem+json,

@@ -9,10 +9,10 @@
 
 | Field | Value |
 | --- | --- |
-| Task | R-070 — chat inference outage regression |
-| File | [R-070-chat-outage.md](../tasks/R-070-chat-outage.md) |
-| Status | in_progress |
-| Branch | `test/R-070-chat-outage` |
+| Task | R-030 — point-in-time retrieval |
+| File | [R-030-point-in-time.md](../tasks/R-030-point-in-time.md) |
+| Status | implemented locally; awaiting review and CI |
+| Branch | `feat/R-030-point-in-time` |
 | Started | 2026-09-06 |
 | Base | `5e339b9` (clean before this task) |
 
@@ -22,7 +22,8 @@ the July 27 handoff's uncommitted-tree statement was stale. Historical evidence
 remains in the QA reports and evidence log. No new CI run has been confirmed.
 Live generation, judging, cost, and current retrieval quality remain unmeasured.
 
-Sequence: R-070, R-030 point-in-time retrieval, T-401–T-405 evaluation foundation,
+R-070 and R-030 are implemented locally on stacked task branches; see the
+2026-09-06 evidence entries. Remaining sequence: T-401–T-405 evaluation foundation,
 T-406–T-409 comparisons/CI/experiments (including R-031), then release demonstration.
 Full eight-slice evaluation is required. Paid generation, judging, and expansion
 share a cumulative US$25 ceiling; no recurring nightly spend is authorized.

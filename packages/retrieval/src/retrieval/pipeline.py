@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from domain.temporal import parse_as_of
 from domain.text import detect_supported_language
 from domain.types import (
     DEFAULT_RRF_K,
@@ -57,11 +59,13 @@ async def retrieve(
     tenant_id: UUID,
     user_id: UUID,
     query: str,
+    as_of: datetime | None = None,
     strategy: RetrievalStrategy | str = RetrievalStrategy.HYBRID_RRF,
     top_k: int = DEFAULT_TOP_K_RERANK,
     retrieval_k: int = DEFAULT_TOP_K_RETRIEVAL,
     rrf_k: int = DEFAULT_RRF_K,
 ) -> RetrievalResult:
+    as_of = parse_as_of(as_of)
     strategy_value = strategy.value if isinstance(strategy, RetrievalStrategy) else str(strategy)
     acl = await resolve_acl(session, tenant_id=tenant_id, user_id=user_id)
     lang = _detect_language_hint(query)
@@ -87,6 +91,7 @@ async def retrieve(
             tenant_id=tenant_id,
             query_vector=vector,
             acl=acl,
+            as_of=as_of,
             top_k=retrieval_k,
         ):
             dense_hits.append(
@@ -109,6 +114,7 @@ async def retrieve(
             tenant_id=tenant_id,
             query=query,
             acl=acl,
+            as_of=as_of,
             top_k=retrieval_k,
             language_hint=lang,
         ):

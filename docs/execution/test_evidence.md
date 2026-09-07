@@ -544,3 +544,35 @@ a missing interpreter. No model calls or paid spend (US$0). No new CI evidence.
 - Sandbox TestClient/ASGI executions hung; outside-sandbox execution passed.
 - Deterministic unit controls run in the suite; DB authorization integration and
   full documented security coverage are not established by this result.
+
+## 2026-09-06 — R-030 point-in-time retrieval (local)
+
+Branch: `feat/R-030-point-in-time`, stacked on R-070 `ddb5623`. Python 3.12.14,
+locked dependencies in `/tmp/milestone-venv`. No paid model calls; cumulative
+allowance used US$0 of US$25. No CI result or real-model quality/latency claim.
+
+- Ruff check/format: pass (138 Python files). Mypy: 67 source files pass.
+- Import-linter: 5 contracts kept, 0 broken.
+- `timeout 120s /tmp/milestone-venv/bin/pytest -q -rs`: 116 passed, 1 skipped,
+  19 deselected. Existing chat integration-like unit test skips on unavailable
+  default port 15432; new tests have no dependency skips.
+- Postgres/pgvector 16 in disposable Podman container `rag-milestone-test`,
+  database `enterprise_rag_test`, port 25432, initialized with the repository's
+  `infra/compose/postgres/init.sql`. App role `rag_app` (RLS enforced).
+- `alembic -c packages/db/alembic.ini upgrade head` from empty, then
+  `downgrade -1`, `upgrade head`, and `python -m db.seed`: all pass. No migration
+  files changed. Existing latest migration is `0004_erasure_audit`.
+- `pytest -q -m integration packages/retrieval/tests/test_temporal_integration.py`:
+  4 passed, 0 skipped. Run with TEST_DATABASE_URL pointing to rag_app on the
+  disposable database and TEST_DATABASE_URL_MIGRATE to rag_migrate on that same DB.
+  All four strategies exercise old/new boundaries, missing versions, current
+  behavior, archive/erasure/injection exclusions, current ACL deny, tenant
+  isolation, lexical evidence, and direct chat-service exact-version citations.
+  Corpus embedding and reranking are deterministic doubles; this is SQL/control
+  evidence, not semantic retrieval evaluation. Tests roll back fixture mutations.
+- OpenAPI matches app in both committed contract locations; generated frontend
+  types regenerated using `npm run generate:api-types --prefix apps/web`.
+- Frontend `tsc --noEmit` and Biome check of generated types: pass.
+- Initial interval test failed due to a duplicate SQL table reference in its
+  SQLite fixture; corrected and rerun. No production defect was masked.
+- Broader service integration, CI, Phase 4 and live release evidence remain pending.

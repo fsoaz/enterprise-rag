@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import func, or_, select
@@ -13,6 +14,7 @@ from sqlalchemy.sql import ColumnElement
 from db.models import Chunk, Document, DocumentVersion
 from domain.types import DEFAULT_TOP_K_RETRIEVAL, INJECTION_RISK_BLOCK
 from retrieval.acl import AclResolution, document_acl_predicate
+from retrieval.temporal import version_predicate
 
 LEXICAL_MIN_RANK = 0.01
 # A chunk only counts as degraded-mode evidence when at least this many *distinct*
@@ -75,6 +77,7 @@ async def lexical_search(
     tenant_id: UUID,
     query: str,
     acl: AclResolution,
+    as_of: datetime | None = None,
     top_k: int = DEFAULT_TOP_K_RETRIEVAL,
     language_hint: str = "en",
 ) -> list[LexicalHit]:
@@ -117,7 +120,7 @@ async def lexical_search(
         .join(Document, Document.id == DocumentVersion.document_id)
         .where(
             Chunk.tenant_id == tenant_id,
-            DocumentVersion.effective_to.is_(None),
+            version_predicate(as_of),
             Document.archived_at.is_(None),
             Document.erased_at.is_(None),
             Chunk.search_vector.is_not(None),
