@@ -506,6 +506,14 @@ harness validates the dataset before retrieval and deduplicates mapped version
 labels before scoring. Focused tests, Ruff, and mypy pass; no quality baseline or
 real-model result was changed.
 
+## 2026-09-07 — T-405 foundation (in progress)
+
+Added tenant-admin evaluation dataset/item/run/result/comparison routes with
+keyset pagination, duplicate registration conflicts, persisted run configuration,
+judge hash, progress/error fields in run params, and OpenAPI/type regeneration.
+The Celery evaluation worker, result persistence, cost-ledger reconciliation, and
+database integration checks remain pending; no completion claim is made.
+
 ## 2026-09-07 — T-404 local implementation
 
 Moved entailment judging to the versioned `entailment_v1` rubric under

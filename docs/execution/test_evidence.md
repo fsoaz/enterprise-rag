@@ -616,6 +616,21 @@ Branch: `feat/T-402-golden-dataset`, based on `3404dc5`. No paid model calls
 - Ruff check/format and mypy pass. Full suite remains to be rerun after this
 task's final edits; integration and live model execution remain separate work.
 
+## 2026-09-07 — T-405 API foundation (local, incomplete)
+
+Branch: `feat/T-405-eval-api`, based on `5faa08b`. No paid calls (US$0 of US$25),
+no CI result, and no evaluation run executed.
+
+- Added `/api/v1/evals/datasets`, dataset item listing, `/runs` creation/status,
+  paginated results, and compatible same-dataset comparison. All routes require
+  tenant-admin access and use existing keyset pagination/problem responses.
+- API contract tests: 6 passed. OpenAPI and generated frontend types regenerated;
+  Ruff, formatting, and mypy pass.
+- Worker task execution, immutable dataset database integration, retries, result
+  writes, ledger reconciliation, and full T-405 acceptance remain pending. The
+  run endpoint records a queued state and dispatches the existing broker name;
+  no worker task is claimed by this foundation commit.
+
 ## 2026-09-07 — T-403 retrieval metrics (local)
 
 Branch: `feat/T-403-retrieval-metrics`, based on `95b52b3`. No paid model calls
