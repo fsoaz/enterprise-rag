@@ -97,13 +97,13 @@ Rules:
   matching composite index ([architecture.md § 14.6](../context/architecture.md#146-key-indexes)).
   Adding a sort option means adding an index and a cursor that names its ordering — not a
   new query parameter on its own.
-- Tenant-scoped listings order within the tenant; `document-versions` and `ingestion-jobs`
+- Tenant-scoped listings order within the tenant; document version and job listings
   order within their parent.
 
 ### 4.2 Filtering & sorting
 
 - Filters are explicit named parameters: `?collection_id=…&language=pt&status=active`. No generic query DSL in the URL.
-- Sorting: `?sort=created_at` / `?sort=-created_at` for descending. Allowed sort fields are enumerated per endpoint in the OpenAPI schema.
+- Ordering is fixed per endpoint; there is no supported `sort` parameter. See [pagination](#41-pagination) and the generated OpenAPI schema for supported query parameters.
 - Full-text or semantic search is **not** a query parameter on a collection endpoint — it is `POST /search`, because it carries a body and is not cacheable.
 
 ## 5. Errors
@@ -166,7 +166,8 @@ RFC 7807 `application/problem+json` on every non-2xx response.
 ## 6. Idempotency
 
 - `GET`, `PUT`, `DELETE` are idempotent by definition.
-- `POST /documents` (upload) accepts an `Idempotency-Key` header. A repeated key within 24 hours returns the original response rather than creating a duplicate. Independently, identical file bytes are deduplicated by `content_sha256` — the key protects against client retries, the hash protects against re-upload.
+- `POST /documents` and `POST /documents/{document_id}/versions` do not implement `Idempotency-Key` or response replay. Upload checks `content_sha256` against current versions of non-erased documents in the same tenant and collection. Matching bytes return `409 conflict`, including when a client retries an upload that was already accepted.
+- After an ambiguous upload outcome, inspect the document listing and its [job history](#8-long-running-operations) before uploading again. A duplicate-content conflict does not return the original upload response or its job ID.
 - `POST /chat/completions` is **not** idempotent and does not accept the header; a retry is a new query and a new cost ledger row.
 
 ## 7. Streaming
@@ -195,14 +196,29 @@ Rules:
 
 ## 8. Long-Running Operations
 
-Anything that cannot reliably finish inside the request budget returns `202 Accepted` plus a job resource.
+Document upload returns `202 Accepted` with `document_id`, `version_id`, `job_id`, and
+`dispatch`. The `dispatch` value describes how ingestion was dispatched (`celery`,
+`sync`, or `failed`); it is not the job's processing status.
 
-```http
-POST /api/v1/documents            → 202  { "job_id": "...", "document_id": "...", "status": "queued" }
-GET  /api/v1/ingestion-jobs/{id}  → 200  { "status": "running", "stage": "embed", "progress": 0.6, ... }
-```
+Poll `GET /api/v1/documents/{document_id}/jobs` and locate the returned `job_id` in
+`data[].id`. The authenticated caller must be able to read the document; an absent
+or unreadable document returns 404. This is a paginated history across the
+document's versions, using `limit` and `cursor` as described in [§ 4.1](#41-pagination).
+Follow `next_cursor` if the job is not on the first page.
 
-Job states: `queued → running → succeeded | failed | cancelled`. A `failed` job carries a readable `error` field. Clients poll; there is no long-poll variant.
+Each job includes `document_version_id`, `stage`, `status`, `attempts`, `error`,
+`started_at`, `finished_at`, and `created_at`. See `JobPage` and `JobOut` in
+[OpenAPI](../../openapi.json) for the exact schemas. There is no numeric `progress`
+field on ingestion jobs.
+
+Job states are `pending → running → succeeded | failed`. Inspect `error` when a
+job fails. There is no ingestion cancellation or retry endpoint, and no
+`/api/v1/ingestion-jobs/{id}` route. Upload acceptance does not prove ingestion
+succeeded: check the terminal job state. Storage failure can return an HTTP error
+after the document and failed job have already been persisted.
+
+See [local ingestion troubleshooting](../guides/local-development.md#upload-stays-pending)
+for worker diagnostics and recovery constraints.
 
 ## 9. Rate Limits & Quotas
 
@@ -247,13 +263,23 @@ The budget check runs *before* the SSE stream opens, so an over-budget tenant re
 ## 11. OpenAPI
 
 - Generated from Pydantic models by FastAPI. Hand-written schema files are not permitted.
-- `openapi.json` is **committed** and diffed in CI. An uncommitted schema change fails the build — this is what makes a breaking change visible in review.
+- `openapi.json` and `apps/web/openapi.json` are committed. CI compares both against a schema generated from the current FastAPI application.
 - Frontend TypeScript types are generated from the committed schema. Generated types are also committed, so drift is a diff.
-- Every endpoint has a summary, a description, an example request, and an example response.
+- Include summaries, descriptions, and examples when adding endpoints; existing coverage is incomplete.
+
+The canonical machine-readable reference is [openapi.json](../../openapi.json).
+A running API serves it at `/api/openapi.json` and provides interactive docs at
+`/api/docs`. Follow the [generation workflow](conventions.md#2-toolchain) after
+changing routes or models.
 
 ## 12. Endpoint Inventory (planned v1)
 
-Phase column refers to [roadmap.md](../context/roadmap.md).
+This section combines implemented routes and proposed interfaces; it is not an
+inventory of currently callable endpoints. Phase numbers refer to
+[roadmap.md](../context/roadmap.md), not implementation status. Use
+[generated OpenAPI](../../openapi.json) to determine whether a route exists and
+which parameters it accepts. The upload and polling workflow in [§ 8](#8-long-running-operations)
+describes the implemented interface.
 
 **Role column** names the minimum role required by the route dependency, where one is implemented today. `—` means any authenticated caller, still scoped by RLS and (where marked) the ACL predicate. A role is necessary but never sufficient on writes: see [§ 2.3](#23-authorization).
 
@@ -303,7 +329,7 @@ Phase column refers to [roadmap.md](../context/roadmap.md).
 
 | Method | Path | Purpose | Role | Phase |
 | --- | --- | --- | --- | --- |
-| `POST` | `/api/v1/documents` | Upload (multipart) → 202 + job. Also requires ACL `write` on the target collection; 413 past `MAX_UPLOAD_BYTES`, 415 outside the PDF/MD/TXT allowlist. The allowlist is decided by **file content** (PDF magic bytes, text sniffing), not the client's `Content-Type`. A failing ingest still returns 202 — the bytes are stored and the job records the failure — never 500. | `steward` | 1 |
+| `POST` | `/api/v1/documents` | Upload (multipart) → 202 + job. Also requires ACL `write` on the target collection; 413 past `MAX_UPLOAD_BYTES`, 415 outside the PDF/MD/TXT allowlist. The allowlist is decided by **file content** (PDF magic bytes, text sniffing), not the client's `Content-Type`. Processing failures after successful storage can still return 202; inspect job history. A storage failure can return an HTTP error after a failed job is persisted. | `steward` | 1 |
 | `GET` | `/api/v1/documents` | List, filterable by collection/status/language/staleness. **ACL-filtered.** | — | 1 |
 | `GET` | `/api/v1/documents/{id}` | Detail incl. current version. **ACL-filtered** (404 when not readable). | — | 1 |
 | `PATCH` | `/api/v1/documents/{id}` | Metadata, owner, review interval | `steward` | 1 |
@@ -319,6 +345,9 @@ Phase column refers to [roadmap.md](../context/roadmap.md).
 | `POST` | `/api/v1/documents/{id}/review` | Mark reviewed; resets staleness | `steward` | 5 |
 
 ### Ingestion jobs
+
+**Planned only:** none of the three routes below is implemented. Current clients
+use `GET /api/v1/documents/{document_id}/jobs`; see [§ 8](#8-long-running-operations).
 
 | Method | Path | Purpose | Phase |
 | --- | --- | --- | --- |
@@ -365,12 +394,13 @@ also means it is re-validated on every request and never trusted from an earlier
 
 | Method | Path | Purpose | Phase |
 | --- | --- | --- | --- |
-| `GET` | `/api/v1/eval-datasets` · `POST` | Dataset registry | 4 |
-| `GET` | `/api/v1/eval-datasets/{id}/items` | Golden items | 4 |
-| `GET` | `/api/v1/eval-runs` · `POST` | List / trigger a run | 4 |
-| `GET` | `/api/v1/eval-runs/{id}` | Run detail with aggregate metrics | 4 |
-| `GET` | `/api/v1/eval-runs/{id}/results` | Per-item results, paginated | 4 |
-| `GET` | `/api/v1/eval-runs/compare?ids=a,b,c` | Strategy comparison matrix | 4 |
+| `GET` | `/api/v1/evals/datasets` · `POST` | Dataset registry | 4 |
+| `GET` | `/api/v1/evals/datasets/{id}/items` | Golden items, paginated | 4 |
+| `GET` | `/api/v1/evals/runs` · `POST` | List / trigger a run | 4 |
+| `GET` | `/api/v1/evals/runs/{id}` | Run detail with aggregate metrics | 4 |
+| `GET` | `/api/v1/evals/runs/{id}/results` | Per-item results, paginated | 4 |
+| `GET` | `/api/v1/evals/runs/compare?ids=a,b,c` | Canonical comparison matrix; IDs are ordered and the first run is the baseline. Every run must be complete with exactly one result per dataset item; conflicts use RFC 7807. | 4 |
+| `GET` | `/api/v1/evals/runs/{left_id}/compare/{right_id}` | Legacy two-run compatibility comparison | 4 |
 
 ### Cost & quotas (admin)
 

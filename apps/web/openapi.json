@@ -2309,6 +2309,82 @@
         }
       }
     },
+    "/api/v1/evals/runs/compare": {
+      "get": {
+        "tags": [
+          "evaluation"
+        ],
+        "summary": "Compare Runs Matrix",
+        "operationId": "compare_runs_matrix_api_v1_evals_runs_compare_get",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000,
+              "title": "Ids"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "X-Dev-User",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Dev-User"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComparisonResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/evals/runs/{run_id}": {
       "get": {
         "tags": [
@@ -3105,6 +3181,131 @@
         ],
         "title": "CollectionPage"
       },
+      "ComparisonResponse": {
+        "properties": {
+          "baseline_run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Baseline Run Id"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonRunOut"
+            },
+            "type": "array",
+            "title": "Runs"
+          },
+          "dataset": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Dataset"
+          },
+          "overall": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Overall"
+          },
+          "by_slice": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              "type": "object"
+            },
+            "type": "object",
+            "title": "By Slice"
+          },
+          "coverage": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Coverage"
+          },
+          "statistics": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Statistics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "baseline_run_id",
+          "runs",
+          "dataset",
+          "overall",
+          "by_slice",
+          "coverage",
+          "statistics"
+        ],
+        "title": "ComparisonResponse"
+      },
+      "ComparisonRunOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "dataset_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Dataset Id"
+          },
+          "strategy": {
+            "type": "string",
+            "title": "Strategy"
+          },
+          "embedding_model": {
+            "type": "string",
+            "title": "Embedding Model"
+          },
+          "reranker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reranker"
+          },
+          "generator_model": {
+            "type": "string",
+            "title": "Generator Model"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "dataset_id",
+          "strategy",
+          "embedding_model",
+          "reranker",
+          "generator_model",
+          "status",
+          "params"
+        ],
+        "title": "ComparisonRunOut"
+      },
       "DatasetCreate": {
         "properties": {
           "name": {
@@ -3141,6 +3342,7 @@
             "title": "Items"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "name",
@@ -3183,6 +3385,17 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "content_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Sha256"
           }
         },
         "type": "object",
@@ -3561,28 +3774,98 @@
       },
       "EvalItemIn": {
         "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "slice": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slice"
+          },
           "question": {
             "type": "string",
             "maxLength": 16000,
             "minLength": 1,
             "title": "Question"
           },
-          "expected_facts": {
+          "expected_answer_facts": {
             "items": {
               "type": "string"
             },
             "type": "array",
             "maxItems": 50,
+            "title": "Expected Answer Facts"
+          },
+          "expected_facts": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Expected Facts"
           },
           "gold_chunk_ids": {
             "items": {
-              "type": "string",
-              "format": "uuid"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "string"
+                }
+              ]
             },
             "type": "array",
             "maxItems": 50,
             "title": "Gold Chunk Ids"
+          },
+          "must_exclude_chunk_ids": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Must Exclude Chunk Ids"
+          },
+          "language": {
+            "type": "string",
+            "pattern": "^(en|pt)$",
+            "title": "Language",
+            "default": "en"
           },
           "as_of": {
             "anyOf": [
@@ -3608,12 +3891,25 @@
             ],
             "title": "Acting User Id"
           },
+          "acting_user": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acting User"
+          },
           "should_abstain": {
             "type": "boolean",
             "title": "Should Abstain",
             "default": false
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "question"
@@ -3712,14 +4008,26 @@
             "format": "uuid",
             "title": "Id"
           },
+          "external_id": {
+            "type": "string",
+            "title": "External Id"
+          },
+          "slice": {
+            "type": "string",
+            "title": "Slice"
+          },
           "question": {
             "type": "string",
             "title": "Question"
           },
-          "expected_facts": {
+          "expected_answer_facts": {
             "items": {},
             "type": "array",
-            "title": "Expected Facts"
+            "title": "Expected Answer Facts"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
           },
           "gold_chunk_ids": {
             "anyOf": [
@@ -3735,6 +4043,20 @@
               }
             ],
             "title": "Gold Chunk Ids"
+          },
+          "gold_chunk_labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gold Chunk Labels"
           },
           "as_of": {
             "anyOf": [
@@ -3763,17 +4085,52 @@
           "should_abstain": {
             "type": "boolean",
             "title": "Should Abstain"
+          },
+          "must_exclude_chunk_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Must Exclude Chunk Ids"
+          },
+          "must_exclude_chunk_labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Must Exclude Chunk Labels"
           }
         },
         "type": "object",
         "required": [
           "id",
+          "external_id",
+          "slice",
           "question",
-          "expected_facts",
+          "expected_answer_facts",
+          "language",
           "gold_chunk_ids",
+          "gold_chunk_labels",
           "as_of",
           "acting_user_id",
-          "should_abstain"
+          "should_abstain",
+          "must_exclude_chunk_ids",
+          "must_exclude_chunk_labels"
         ],
         "title": "ItemOut"
       },
@@ -4104,6 +4461,21 @@
             ],
             "title": "Answer Text"
           },
+          "citations": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citations"
+          },
           "verdict": {
             "anyOf": [
               {
@@ -4134,6 +4506,7 @@
           "retrieved_chunk_ids",
           "metrics",
           "answer_text",
+          "citations",
           "verdict",
           "cost_usd"
         ],

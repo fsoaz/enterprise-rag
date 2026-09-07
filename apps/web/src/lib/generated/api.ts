@@ -423,6 +423,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/evals/runs/compare": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Compare Runs Matrix */
+    get: operations["compare_runs_matrix_api_v1_evals_runs_compare_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/evals/runs/{run_id}": {
     parameters: {
       query?: never;
@@ -685,6 +702,73 @@ export interface components {
       /** Next Cursor */
       next_cursor: string | null;
     };
+    /** ComparisonResponse */
+    ComparisonResponse: {
+      /**
+       * Baseline Run Id
+       * Format: uuid
+       */
+      baseline_run_id: string;
+      /** Runs */
+      runs: components["schemas"]["ComparisonRunOut"][];
+      /** Dataset */
+      dataset: {
+        [key: string]: unknown;
+      };
+      /** Overall */
+      overall: {
+        [key: string]: {
+          [key: string]: {
+            [key: string]: unknown;
+          };
+        };
+      };
+      /** By Slice */
+      by_slice: {
+        [key: string]: {
+          [key: string]: {
+            [key: string]: {
+              [key: string]: unknown;
+            };
+          };
+        };
+      };
+      /** Coverage */
+      coverage: {
+        [key: string]: unknown;
+      };
+      /** Statistics */
+      statistics: {
+        [key: string]: unknown;
+      };
+    };
+    /** ComparisonRunOut */
+    ComparisonRunOut: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Dataset Id
+       * Format: uuid
+       */
+      dataset_id: string;
+      /** Strategy */
+      strategy: string;
+      /** Embedding Model */
+      embedding_model: string;
+      /** Reranker */
+      reranker: string | null;
+      /** Generator Model */
+      generator_model: string;
+      /** Status */
+      status: string;
+      /** Params */
+      params: {
+        [key: string]: unknown;
+      };
+    };
     /** DatasetCreate */
     DatasetCreate: {
       /** Name */
@@ -716,6 +800,8 @@ export interface components {
        * Format: date-time
        */
       created_at: string;
+      /** Content Sha256 */
+      content_sha256?: string | null;
     };
     /** DatasetPage */
     DatasetPage: {
@@ -863,16 +949,31 @@ export interface components {
     };
     /** EvalItemIn */
     EvalItemIn: {
+      /** Id */
+      id?: string | null;
+      /** Slice */
+      slice?: string | null;
       /** Question */
       question: string;
+      /** Expected Answer Facts */
+      expected_answer_facts?: string[];
       /** Expected Facts */
-      expected_facts?: string[];
+      expected_facts?: string[] | null;
       /** Gold Chunk Ids */
       gold_chunk_ids?: string[];
+      /** Must Exclude Chunk Ids */
+      must_exclude_chunk_ids?: string[];
+      /**
+       * Language
+       * @default en
+       */
+      language: string;
       /** As Of */
       as_of?: string | null;
       /** Acting User Id */
       acting_user_id?: string | null;
+      /** Acting User */
+      acting_user?: string | null;
       /**
        * Should Abstain
        * @default false
@@ -923,18 +1024,30 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /** External Id */
+      external_id: string;
+      /** Slice */
+      slice: string;
       /** Question */
       question: string;
-      /** Expected Facts */
-      expected_facts: unknown[];
+      /** Expected Answer Facts */
+      expected_answer_facts: unknown[];
+      /** Language */
+      language: string;
       /** Gold Chunk Ids */
       gold_chunk_ids: string[] | null;
+      /** Gold Chunk Labels */
+      gold_chunk_labels: string[] | null;
       /** As Of */
       as_of: string | null;
       /** Acting User Id */
       acting_user_id: string | null;
       /** Should Abstain */
       should_abstain: boolean;
+      /** Must Exclude Chunk Ids */
+      must_exclude_chunk_ids: string[] | null;
+      /** Must Exclude Chunk Labels */
+      must_exclude_chunk_labels: string[] | null;
     };
     /** ItemPage */
     ItemPage: {
@@ -1055,6 +1168,12 @@ export interface components {
       };
       /** Answer Text */
       answer_text: string | null;
+      /** Citations */
+      citations:
+        | {
+            [key: string]: unknown;
+          }[]
+        | null;
       /** Verdict */
       verdict: string | null;
       /** Cost Usd */
@@ -2307,6 +2426,40 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["RunOut"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  compare_runs_matrix_api_v1_evals_runs_compare_get: {
+    parameters: {
+      query: {
+        ids: string;
+      };
+      header?: {
+        authorization?: string | null;
+        "X-Dev-User"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ComparisonResponse"];
         };
       };
       /** @description Validation Error */

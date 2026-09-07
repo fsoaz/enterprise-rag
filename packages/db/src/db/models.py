@@ -606,6 +606,16 @@ class CostLedger(Base):
         ForeignKey("queries.id", ondelete="SET NULL"),
         nullable=True,
     )
+    eval_run_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("eval_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    eval_item_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("eval_items.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     purpose: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(Text, nullable=False)
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
@@ -618,6 +628,9 @@ class CostLedger(Base):
     )
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     computed_cost_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    reported_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="succeeded")
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     price_table_version: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
@@ -626,6 +639,7 @@ class CostLedger(Base):
         Index("ix_cost_ledger__tenant_id", "tenant_id"),
         Index("ix_cost_ledger__tenant_created_at", "tenant_id", "created_at"),
         Index("ix_cost_ledger__query_id", "query_id"),
+        Index("ix_cost_ledger__eval_run_item", "eval_run_id", "eval_item_id"),
     )
 
 
@@ -695,6 +709,7 @@ class EvalDataset(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[str] = mapped_column(Text, nullable=False)
     dataset_slice: Mapped[str | None] = mapped_column("slice", Text, nullable=True)
+    content_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
 
@@ -721,12 +736,20 @@ class EvalItem(Base):
         nullable=False,
     )
     question: Mapped[str] = mapped_column(Text, nullable=False)
+    external_id: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    item_slice: Mapped[str] = mapped_column("slice", Text, nullable=False, server_default="default")
+    language: Mapped[str] = mapped_column(Text, nullable=False, server_default="en")
     expected_facts: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
     gold_chunk_ids: Mapped[list[UUID] | None] = mapped_column(
         ARRAY(PGUUID(as_uuid=True)), nullable=True
     )
+    gold_chunk_labels: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    must_exclude_chunk_ids: Mapped[list[UUID] | None] = mapped_column(
+        ARRAY(PGUUID(as_uuid=True)), nullable=True
+    )
+    must_exclude_chunk_labels: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     as_of: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     acting_user_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
@@ -740,6 +763,7 @@ class EvalItem(Base):
     __table_args__ = (
         Index("ix_eval_items__tenant_id", "tenant_id"),
         Index("ix_eval_items__dataset_id", "dataset_id"),
+        UniqueConstraint("dataset_id", "external_id", name="uq_eval_items__dataset_external_id"),
     )
 
 
@@ -803,6 +827,7 @@ class EvalResult(Base):
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     answer_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    citations: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
     verdict: Mapped[str | None] = mapped_column(Text, nullable=True)
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
     created_at: Mapped[datetime] = _created_at()
@@ -812,4 +837,5 @@ class EvalResult(Base):
         Index("ix_eval_results__tenant_id", "tenant_id"),
         Index("ix_eval_results__run_id", "run_id"),
         Index("ix_eval_results__item_id", "item_id"),
+        UniqueConstraint("run_id", "item_id", name="uq_eval_results__run_item"),
     )

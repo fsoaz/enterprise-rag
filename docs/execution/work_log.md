@@ -4,6 +4,50 @@
 > One entry per completed task. Never edit or delete a past entry; correct it with a new one that says what changed.
 > **Related:** [current_task.md](./current_task.md) · [test_evidence.md](./test_evidence.md) · [review_notes.md](./review_notes.md)
 
+## 2026-09-07 — T-407 CI evaluation gates (implementation)
+
+**Status:** in_review
+**PR:** —
+**Branch:** working tree
+
+### What changed
+
+Added the inference-backed `eval-smoke` GitHub Actions job and scheduled full-run
+workflow. The CI harness validates the complete committed corpus, selects a
+deterministic 48-item all-slice smoke set, loads it through the real worker
+pipeline, runs the T-406 four-strategy comparison, publishes artifacts, and applies
+strict quality/security thresholds against the committed stub baseline.
+
+### Decisions
+
+The smoke gate compares the `hybrid_rrf` baseline strategy against the committed
+known-good report; security metrics are checked for every strategy. Null optional
+inference endpoints are normalized in the worker so JSON configuration cannot turn
+`null` into the literal URL `"None"`.
+
+### Verification
+
+[E-012](./test_evidence.md) records 16 focused tests and the local disposable
+service run. The first GitHub Actions smoke result is still required before R-031
+can be marked resolved.
+
+### Follow-ups
+
+R-031 remains `scheduled` pending green GitHub Actions evidence. T-408 and T-409
+remain subsequent experiment tasks.
+
+## 2026-09-07 — T-406 strategy comparison runner
+
+Implemented the JSON-configured comparison runner with strict validation, deterministic
+Cartesian sweeps, sequential API/Celery child execution, terminal-result polling, paired
+10,000-resample bootstrap confidence intervals, and reproducible overall/per-slice reports.
+Retrieval now carries immutable run-level embedding/reranker identities and inference
+endpoints, validates inference response identities, and preserves older retrieval callers.
+Added the canonical `/api/v1/evals/runs/compare?ids=...` matrix endpoint, exact result
+coverage/conflict enforcement, item-level slices, additive persistence fields, OpenAPI and
+frontend type synchronization, and live disposable-Postgres evidence. No paid model calls
+were made; T-407 CI gates and later experiments remain outstanding.
+
 ## Entry format
 
 ```markdown
@@ -530,3 +574,62 @@ per-item retrieval metrics/results, updates progress, and records explicit
 incomplete status when answer generation is unavailable. API registration now
 rejects cross-tenant acting users and gold chunks. Generation/judging, ledger
 accounting, retry semantics, and database integration remain open.
+
+## 2026-09-07 — T-405 execution implementation (integration pending)
+
+Replaced the placeholder evaluation worker with durable per-item execution using
+the production retrieval/generation primitives and the versioned `entailment_v1`
+Haiku judge. Results now persist answer text, citations, verdict, answer/citation/
+faithfulness/relevance/abstention/authorization metrics, judge hash, and total
+reconciled cost. Generation, judge, and budget-rejection attempts are linked to
+the run and item in `cost_ledger`; terminal result uniqueness makes Celery
+redelivery idempotent. Added additive migration `0005_eval_execution`, documented
+dataset fields and validation, API contract regeneration, and focused failure /
+success worker tests. Focused tests, Ruff, mypy, OpenAPI, generated client, and
+offline migration SQL checks pass. Docker is unavailable in this environment, so
+the disposable-Postgres integration suite was not run and T-405 remains open.
+
+## 2026-09-07 — T-405 complete (Podman verification)
+
+Started disposable Postgres, Redis, and stub inference services with Podman.
+Applied the init SQL and Alembic migrations through `0005_eval_execution`,
+seeded the test database, and ran the T-405 API integration tests plus the full
+integration marker. Results: T-405 integration 2 passed; full integration 18
+passed, 3 skipped, 138 deselected. No paid model calls occurred. T-405 is now
+complete with database migration, registration, run/progress, result/failure,
+pagination, comparison, authorization, and tenant-isolation evidence.
+
+
+## 2026-09-07 — Documentation audit remediation
+
+Applied the nine documentation-audit corrections: worker startup and process
+environment loading, upload retry semantics and job polling, security automation
+status, proposed cloud deployment status, source-driven API generation, fixed
+pagination ordering, and tracked documentation ownership. The README now leads
+with prerequisites, full Compose startup, readiness checks, and contribution
+links. Added `docs/guides/local-development.md` for separate-process startup,
+configuration loading, first-upload verification, and failure diagnosis; replaced
+the frontend scaffold README with project-specific guidance. Also corrected the
+related seed-content claim, local bypass CORS setup, CI job inventory, and Python
+coverage-enforcement claim. Existing implementation and documentation edits were
+preserved; no application code or generated API files were changed by this task.
+
+Validation performed on the current working tree:
+
+- Checked 162 local links, including Markdown heading anchors, across the seven
+  edited/new reader-facing documents: all resolved.
+- Parsed 21 shell blocks with `bash -n`: all passed.
+- Compared both OpenAPI JSON files with `app.openapi()`: both matched.
+- Checked upload response fields, job route/state/schema, lack of upload
+  idempotency parameters, and fixed-order listing parameters against the runtime
+  schema and domain enum: passed.
+- Executed direct liveness and inference service-token checks: passed.
+- Executed an isolated uv environment-file/precedence check with uv 0.12.10: passed.
+- Confirmed documented Make targets, npm scripts, runtime pins, and toolchain
+  paths exist. `git diff --check` passed.
+
+[VERIFY] Full Docker Compose startup, real-model loading, OIDC sign-in, and the UI
+upload walkthrough were not executed in this documentation pass. The Docker CLI
+is unavailable here. Hosted branch protection, external scanning, and any cloud
+infrastructure outside this repository remain unverified. Earlier historical
+execution entries above retain their original scope and evidence.

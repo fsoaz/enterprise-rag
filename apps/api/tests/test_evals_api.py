@@ -16,6 +16,7 @@ def test_evaluation_api_surface_is_registered() -> None:
     assert "/api/v1/evals/datasets/{dataset_id}/items" in paths
     assert "/api/v1/evals/runs" in paths
     assert "/api/v1/evals/runs/{run_id}/results" in paths
+    assert "/api/v1/evals/runs/compare" in paths
     assert "/api/v1/evals/runs/{left_id}/compare/{right_id}" in paths
 
 

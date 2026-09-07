@@ -5,6 +5,96 @@
 
 Claiming a task is done requires an entry here. "Tests pass" without a command and an output is not evidence.
 
+### E-012 — 2026-09-07 — T-407 CI evaluation gates (implementation review)
+
+**Environment:** local disposable Postgres/Redis containers with current-source API,
+Celery worker, and stub inference; no paid model calls.
+
+| Command | Result |
+| --- | --- |
+| Focused gate, comparison, API, retrieval, and worker tests | **36 passed** |
+| Ruff, formatting, mypy, and diff checks | **pass** |
+| Smoke selection and workflow service path | **48 items × 4 strategies; 48/48 results per run** |
+| Deliberate quality regression fixture | **fails with `RegressionDetected`** |
+| Missing metric fixture | **fails closed with `GateError`** |
+| Incompatible dataset fixture | **fails closed with `GateError`** |
+| ACL bypass fixture | **fails with `RegressionDetected`** |
+
+Measured smoke baseline (`hybrid_rrf`, stub-v0): recall@10 **0.1042**, nDCG@10
+**0.0526**, faithfulness **0.0417**, citation precision **0.3333**,
+unsupported-answer rate **1.0000**, correct-abstention rate **0.3333**. All four
+strategies returned exactly 48 results; tenant leakage and ACL bypass were **0**.
+
+**Acceptance criteria verified:**
+
+- [x] Threshold evaluation is pure and deterministic, with explicit quality
+  allowances and zero-tolerance security metrics.
+- [x] The smoke runner validates all 320 committed items before selecting six per
+  slice, yielding 48 deterministic items across all eight slices.
+- [x] Reports carry dataset/config metadata so random run IDs cannot make an
+  incompatible baseline appear valid.
+- [ ] GitHub Actions `eval-smoke` has passed; R-031 remains scheduled until then.
+
+**Notes:** This entry records local implementation and disposable-service evidence.
+It intentionally does not claim that the committed baseline has passed in GitHub
+Actions; the hosted smoke run is the remaining R-031 evidence.
+
+### E-011 — 2026-09-07 — T-406 strategy comparison runner
+
+**Environment:** local disposable Podman Postgres/Redis and stub inference; no paid
+model calls. Postgres was migrated from empty through `0005_eval_execution` and seeded
+with both demo tenants.
+
+| Command | Result |
+| --- | --- |
+| Focused deterministic harness, API, worker, and retrieval selection | **41 passed** |
+| `mypy` | pass — no issues in **70 source files** |
+| `ruff check .` · `ruff format --check .` · `git diff --check` | pass |
+| `npm run generate:api-types` · `biome check .` · `tsc --noEmit` | pass; generated client synchronized |
+| Full `pytest -q -m integration` against disposable Postgres, Redis, and stub inference | **19 passed, 3 skipped, 146 deselected** |
+| Canonical comparison integration test | **3 passed**; per-slice deltas, complete coverage, and RFC 7807 incomplete-run conflict verified |
+| Stub inference health probe | service healthy; source response models now include model/version identities (the prebuilt local image predates this additive field and was not rebuilt) |
+
+**Acceptance criteria verified:**
+
+- [x] Strict JSON validation, Cartesian expansion, duplicate rejection, baseline ordering,
+  item alignment, empty paired observations, and deterministic bootstrap intervals.
+- [x] Run-level embedding/reranker identity and endpoint propagation, response identity
+  validation, and immutable sweep configuration in `EvalRun.params`.
+- [x] Ordered canonical API matrix with overall/per-slice values, signed and absolute deltas,
+  95% CI bounds, significance, result counts, and item coverage.
+- [x] Incomplete or missing-result rejection, dataset compatibility, tenant isolation,
+  pagination, RFC 7807 conflicts, and legacy pair endpoint compatibility.
+
+**Notes:** The repository-wide default non-integration command still encounters the
+pre-existing unauthenticated `test_me`/inference TestClient hang; the complete
+deterministic T-406 selection above passes independently, and all integration tests
+pass with disposable services.
+
+### E-010 — 2026-09-07 — T-405 execution implementation (pre-Podman)
+
+**Environment:** local working tree; no Docker binary and no disposable Postgres available.
+**Commit:** working tree on `feat/T-405-eval-api`
+
+| Command | Result |
+| --- | --- |
+| `uv run pytest -q apps/worker/tests/test_eval_task.py apps/api/tests/test_evals_api.py evals/harness/test_dataset.py packages/llm/tests/test_judge.py packages/llm/tests/test_groundedness.py` | **17 passed** |
+| `uv run mypy` | pass — no issues in **70 source files** |
+| `ruff check .` · `ruff format --check .` · `git diff --check` | pass |
+| `npm run generate:api-types` followed by `npx biome check . && npx tsc --noEmit` | pass; generated client updated deterministically |
+| `alembic upgrade head --sql` with a test-designated Postgres URL | pass — migration chain renders through `0005_eval_execution` |
+| `bash scripts/run-integration-tests.sh` | **not run: `docker` command unavailable** |
+
+**Acceptance criteria verified:**
+- [x] Worker registration, production-path answer/citation/verdict/quality persistence, and retry configuration — focused worker tests and source inspection.
+- [x] Versioned Haiku rubric hash and model identity — focused success-path worker test and offline migration check.
+- [x] Generation, judge, and budget-rejection ledger fields with reconciliation metadata — focused success/failure tests and model/migration inspection.
+- [x] Result uniqueness and terminal-result handling for task redelivery — database constraint and worker terminal-result lookup.
+- [x] Dataset fields, content hash, tenant ownership, and semantic validation — API validation tests and generated OpenAPI contract.
+- [ ] Disposable-Postgres migrations, RLS, worker execution, pagination, comparison, problem responses, and tenant isolation — blocked by missing Docker/test database.
+
+**Notes:** The full default pytest command was also attempted and hung in the pre-existing unauthenticated `test_me` path after 20 tests; it was interrupted. This entry records the state before disposable services were available; the completion evidence is in E-011 below.
+
 ---
 
 ## Entry format
@@ -669,3 +759,29 @@ contract/worker tests: 4 passed after the worker change. Ruff, formatting, and
 mypy pass; OpenAPI and generated types were regenerated. No paid calls, CI result,
 or completed evaluation run. Retry, ledger, answer-path, and disposable database
 integration evidence remain pending.
+
+### E-011 — 2026-09-07 — T-405 completion (Podman)
+
+Ran the T-405 checks against a disposable `pgvector/pgvector:pg16` Postgres
+container on `localhost:15432`, with Redis on `localhost:16379` and the stub
+inference service built and run from `infra/compose/Dockerfile.inference` on
+`localhost:18001`. Created `enterprise_rag_test`, applied the init SQL, ran
+Alembic through `0005_eval_execution`, and seeded the database before testing.
+
+- T-405 database/API integration tests: 2 passed.
+- Full integration marker: 18 passed, 3 skipped, 138 deselected.
+- Focused worker/API/judge/dataset checks: 17 passed.
+- Worker tests cover generation failure ledger persistence, successful
+  generation and Haiku judge ledger rows, result metrics/citations/cost, and
+  Celery retry registration.
+- No paid model calls were made. The three skips are existing integration
+  dependencies outside T-405; no T-405 test was skipped.
+
+| Command | Result |
+| --- | --- |
+| `pytest -q -o addopts='' -m integration apps/api/tests/test_evals_integration.py` | **2 passed** |
+| `pytest -q -o addopts='' -m integration` | **18 passed, 3 skipped, 138 deselected** |
+
+This provides disposable database evidence for migrations, registration, runs,
+progress, result/error API responses, pagination, comparison, authorization,
+and tenant isolation. T-405 is complete.

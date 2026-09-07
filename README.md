@@ -2,11 +2,11 @@
 
 **Enterprise RAG Document Intelligence System** — turn a static document repository into an interactive, cited knowledge layer with permission-aware retrieval.
 
-> **Status: Milestone A complete, after a security pass and a full QA remediation round.** Real OIDC sign-in, real BGE-M3 and BGE-reranker-v2-m3 weights, multi-turn chat, a PT/EN interface, keyset pagination, and a frontend test tier. CI alone selects the deterministic inference backend, so tests stay offline and reproducible. Set `ANTHROPIC_API_KEY` for synthesized answers; without one the system abstains rather than guessing.
+> **Status: Milestone A complete, after a security pass and a full QA remediation round.** Real OIDC sign-in, real BGE-M3 and BGE-reranker-v2-m3 weights, multi-turn chat, a PT/EN interface, keyset pagination, and a frontend test tier. CI and the integration-test helper select the deterministic inference backend for reproducible checks. Set `ANTHROPIC_API_KEY` for synthesized answers; without one the system abstains rather than guessing.
 >
 > Those rounds closed the defects in [review_notes.md](docs/execution/review_notes.md) — an abstention gate structurally stuck on under the default strategy, ingest failures that were never recorded, a prompt-injection score nothing read, and a frontend with no configuration that was both functional and safe. See [work_log.md](docs/execution/work_log.md).
 >
-> **Not yet measured:** answer quality, latency and cost against the live Anthropic API, which needs production credentials. The eval harness is still a local command rather than a CI gate ([R-031](docs/execution/review_notes.md)).
+> **Not yet measured:** answer quality, latency and cost against the live Anthropic API, which needs production credentials. The deterministic stub-backed eval gate is now wired for pull requests and scheduled full runs; the first hosted smoke result is still pending before [R-031](docs/execution/review_notes.md) can close.
 
 ---
 
@@ -29,7 +29,7 @@ This system answers questions in Portuguese or English, grounded in an organizat
 | Storage | MinIO (dev) / S3 (cloud) |
 | Frontend | Next.js (App Router) · TypeScript · Tailwind CSS · no component library |
 | Auth | OIDC Authorization Code + PKCE — Keycloak (dev); tokens held server-side in `HttpOnly` cookies |
-| Deploy | Docker Compose (dev) · Terraform → AWS ECS Fargate (cloud) |
+| Deploy | Docker Compose (dev); AWS/Terraform deployment is proposed, not implemented |
 
 No orchestration framework, no managed vector database. Both are deliberate — see [ADR-001](docs/context/architecture.md#adr-001--no-orchestration-framework) and [ADR-002](docs/context/architecture.md#adr-002--postgres-only-search).
 
@@ -60,54 +60,63 @@ browser ──▶ Next.js server ──▶ FastAPI api ──┬──▶ Postgr
 
 Full diagram and component contracts: [architecture.md § 3](docs/context/architecture.md#3-component-topology).
 
-## Documentation
-
-Architecture notes, ADRs, and the review register are maintained outside this
-repository (local `docs/` is intentionally untracked). Paths below describe that
-local tree when present.
-
-### Context — what and why
-
-| Document | Contents |
-| --- | --- |
-| [product.md](docs/context/product.md) | Problem, personas, scope, differentiators, success metrics, user stories |
-| [architecture.md](docs/context/architecture.md) | Topology, tenancy, ACL model, versioning, retrieval pipeline, citations, injection defense, groundedness, evaluation, cost, resilience, data model, ADRs, deployment |
-| [roadmap.md](docs/context/roadmap.md) | Eight dependency-ordered phases with exit criteria; deferred list; requirement-coverage matrix |
-
-### Standards — how we build
-
-| Document | Contents |
-| --- | --- |
-| [conventions.md](docs/standards/conventions.md) | Toolchain, module boundaries, code style, database and migration rules, logging, git, definition of done |
-| [api_rules.md](docs/standards/api_rules.md) | Versioning, auth, error format, streaming, rate limits, full v1 endpoint inventory |
-| [testing.md](docs/standards/testing.md) | Eight test tiers, coverage targets, the security suite, eval gates, CI pipeline |
-| [ai_agent_rules.md](docs/standards/ai_agent_rules.md) | Rules for AI agents in this repo, plus the LLM-integration constraints that are correctness-critical |
-
-### Execution — where we are
-
-| Document | Contents |
-| --- | --- |
-| [current_task.md](docs/execution/current_task.md) | The one task in progress, and what is next |
-| [work_log.md](docs/execution/work_log.md) | Append-only record of completed work and decisions |
-| [review_notes.md](docs/execution/review_notes.md) | Review findings register and the standing review checklist |
-| [test_evidence.md](docs/execution/test_evidence.md) | What was run, what it showed, and the quality/security snapshot tables |
-| [qa_report_2026-07-26.md](docs/execution/qa_report_2026-07-26.md) | Full QA review of Milestone A — 37 findings and their disposition |
-| [tasks/](docs/tasks/README.md) | Task numbering, lifecycle, and the task spec template |
-
 ## Getting started
+
+### Prerequisites
+
+- Python **3.12** (`>=3.12,<3.13`), uv, GNU Make, and Bash.
+- Docker Engine and Docker Compose v2 with support for the checked-in Compose file.
+- Node **22** and npm for local frontend development and contribution checks.
+- curl for readiness checks; network access for dependencies, images, and model weights.
+
+Postgres 16 with pgvector, Redis, MinIO, and Keycloak run in Compose. Real BGE
+models run on CPU by default. First startup includes image builds and model
+loading and may take more than ten minutes; no fixed RAM/disk minimum has been
+measured for this project. Check available resources if model loading fails.
+
+### Install, configure, and run
+
+Run from the repository root. On a fresh checkout:
 
 ```bash
 cp .env.example .env
-cp apps/web/.env.example apps/web/.env.local
 uv sync --all-packages --group dev
-uv sync --package enterprise-rag-inference --extra models  # real BGE runtime
-cd apps/web && npm install && cd ../..
-docker compose -f infra/compose/docker-compose.yml up -d postgres redis minio keycloak
-make migrate && make seed
-uv run uvicorn inference.main:app --host 127.0.0.1 --port 8001 &
-uv run uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload &
-cd apps/web && npm run dev
 ```
+
+Keep an existing `.env` instead of overwriting it. Review [.env.example](.env.example)
+for configuration. Leave the Anthropic key placeholder unchanged to use degraded
+responses, or set your own `ANTHROPIC_API_KEY` for synthesized answers.
+
+Start the full development stack:
+
+```bash
+make up
+```
+
+This builds and starts the services, applies migrations, seeds demo identities
+and collections, and starts the API, worker, inference, and web. The seed does
+not load document content. Compose configures the web container directly;
+`apps/web/.env.local` is used only when running the frontend locally.
+
+For hot reload or Python service development, follow
+[Run processes separately](docs/guides/local-development.md#run-processes-separately),
+which includes environment loading and worker startup.
+
+### Verify that it works
+
+```bash
+curl --fail --silent --show-error http://localhost:8001/ready
+curl --fail --silent --show-error http://localhost:8000/health
+curl --fail --silent --show-error http://localhost:8000/ready
+```
+
+Expect inference readiness, API liveness, and API readiness respectively. The API
+readiness response includes database, Redis, and inference checks; HTTP 503 means
+at least one failed. It does not verify the worker or an upload. Sign in as
+explained below, then [verify a first upload](docs/guides/local-development.md#verify-an-upload).
+For failures, use the [troubleshooting guide](docs/guides/local-development.md#troubleshooting).
+
+Stop the stack with `make down`; Compose data volumes are retained.
 
 ### Dev auth and network exposure
 
@@ -118,11 +127,14 @@ and use a seeded identity such as `acme-member` / `acme-member` or
 cookies; the Next.js server refreshes and forwards them to FastAPI.
 
 The realm and database seed share stable tenant UUIDs. If the database predates
-this auth setup, run `make db-reset` once so its seeded identities match the realm.
+this auth setup, `make db-reset` rebuilds its seeded identities to match the realm.
+This deletes all development database data; use it only for a disposable database.
 
 To use header-based impersonation instead, set `DEV_AUTH_BYPASS=true` in `.env`
-and `NEXT_PUBLIC_DEV_AUTH=true` in `apps/web/.env.local`, then restart both API
-and web. The browser sends `X-Dev-User` only in that explicit mode.
+and `CORS_ALLOW_ORIGINS=http://localhost:3000` in `.env`, plus
+`NEXT_PUBLIC_DEV_AUTH=true` in `apps/web/.env.local`. Use the separate-process
+workflow and restart API and web. In this mode the browser calls FastAPI directly
+and sends `X-Dev-User`. Compose forces bypass off.
 
 > **`DEV_AUTH_BYPASS=true` trusts that header with no verification — any caller can
 > become any user, in any tenant.** Use it only on a development machine.
@@ -144,8 +156,53 @@ fails **open** when Redis is unreachable (a cache outage should not be a full
 outage); the budget guard reads `cost_ledger` in Postgres, so it holds regardless.
 
 Seeded roles drive authorization: `acme-admin` (admin — manages ACL entries),
-`acme-steward` (curator — uploads and archives documents), `acme-member` and
+`acme-steward` (`steward` role — uploads and archives documents), `acme-member` and
 `acme-viewer` (read-only, and they see different documents by ACL).
+
+## Documentation
+
+Developer guides, architecture notes, ADRs, and the review register are tracked in
+`docs/` and maintained with the implementation. Start with the
+[local development and troubleshooting guide](docs/guides/local-development.md).
+The [generated OpenAPI schema](openapi.json) is the current API reference; a running
+API also serves interactive documentation at `http://localhost:8000/api/docs`.
+
+### Context — what and why
+
+| Document | Contents |
+| --- | --- |
+| [product.md](docs/context/product.md) | Problem, personas, scope, differentiators, success metrics, user stories |
+| [architecture.md](docs/context/architecture.md) | Topology, tenancy, ACL model, versioning, retrieval pipeline, citations, injection defense, groundedness, evaluation, cost, resilience, data model, ADRs, deployment |
+| [roadmap.md](docs/context/roadmap.md) | Eight dependency-ordered phases with exit criteria; deferred list; requirement-coverage matrix |
+
+### Standards — how we build
+
+| Document | Contents |
+| --- | --- |
+| [conventions.md](docs/standards/conventions.md) | Toolchain, module boundaries, code style, database and migration rules, logging, git, definition of done |
+| [api_rules.md](docs/standards/api_rules.md) | API guidance, upload/job workflow, and planned interfaces; use OpenAPI for current routes |
+| [testing.md](docs/standards/testing.md) | Test tiers, coverage targets, security checks, and implemented versus proposed CI gates |
+| [ai_agent_rules.md](docs/standards/ai_agent_rules.md) | Rules for AI agents in this repo, plus the LLM-integration constraints that are correctness-critical |
+
+### Execution — where we are
+
+| Document | Contents |
+| --- | --- |
+| [current_task.md](docs/execution/current_task.md) | The one task in progress, and what is next |
+| [work_log.md](docs/execution/work_log.md) | Append-only record of completed work and decisions |
+| [review_notes.md](docs/execution/review_notes.md) | Review findings register and the standing review checklist |
+| [test_evidence.md](docs/execution/test_evidence.md) | What was run, what it showed, and the quality/security snapshot tables |
+| [qa_report_2026-07-26.md](docs/execution/qa_report_2026-07-26.md) | Full QA review of Milestone A — 37 findings and their disposition |
+| [tasks/](docs/tasks/README.md) | Task numbering, lifecycle, and the task spec template |
+
+## Contributing
+
+Read [engineering conventions](docs/standards/conventions.md) and
+[testing standards](docs/standards/testing.md). Use Conventional Commits, link the
+relevant [task](docs/tasks/README.md), and include verification evidence in the PR.
+Update documentation alongside behavior changes. For API changes, follow the
+[canonical generation workflow](docs/standards/conventions.md#2-toolchain).
+Install frontend dependencies with `npm ci --prefix apps/web` before running checks.
 
 ### Tests
 
@@ -154,7 +211,7 @@ make lint typecheck        # ruff · biome · mypy · import-linter · tsc
 make test                  # pytest, unit tier
 make test-integration      # creates, migrates, seeds, tests, and drops a disposable database
 make migrate-check         # runs the migration chain from an EMPTY database, as CI does
-cd apps/web && npm test    # vitest — components and browser-side modules
+npm test --prefix apps/web # vitest — components and browser-side modules
 ```
 
 `make test-integration` will not touch the development database: the target name must end
@@ -168,8 +225,8 @@ The harness scores real retrieval against the fixture corpus — it needs Postgr
 a seeded tenant, and the inference service running:
 
 ```bash
-uv run python -m evals.harness.run --load-corpus   # ingest evals/fixtures, then score
-uv run python -m evals.harness.run                 # score against the loaded corpus
+uv run --no-sync --env-file .env python -m evals.harness.run --load-corpus   # ingest evals/fixtures, then score
+uv run --no-sync --env-file .env python -m evals.harness.run                 # score against the loaded corpus
 ```
 
 Scores are only meaningful on a corpus you rebuilt with `--load-corpus`.

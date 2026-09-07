@@ -20,6 +20,7 @@ class EmbedRequest(BaseModel):
 class EmbedResponse(BaseModel):
     vectors: list[list[float]]
     model: str
+    version: str
     dim: int
 
 
@@ -27,4 +28,9 @@ class EmbedResponse(BaseModel):
 async def embed(body: EmbedRequest) -> EmbedResponse:
     backend = get_backend()
     vectors = await anyio.to_thread.run_sync(partial(backend.embed, body.texts, mode=body.mode))
-    return EmbedResponse(vectors=vectors, model=backend.embedding_model, dim=EMBEDDING_DIM)
+    return EmbedResponse(
+        vectors=vectors,
+        model=backend.embedding_model,
+        version=backend.embedding_version,
+        dim=EMBEDDING_DIM,
+    )

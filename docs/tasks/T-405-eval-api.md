@@ -1,13 +1,13 @@
-# T-405 — Evaluation persistence and API foundation
+# T-405 — Evaluation persistence and API
 
 | Field | Value |
 | --- | --- |
 | ID | T-405 |
 | Phase | 4 — Evaluation |
-| Status | in_progress |
+| Status | done |
 | Branch | feat/T-405-eval-api |
 | Depends on | T-402, T-403, T-404 |
-| Blocks | T-406, T-407 |
+| Blocks | T-407 |
 
 ## Goal
 
@@ -16,21 +16,23 @@ with paginated items/results and compatible run comparison.
 
 ## Acceptance criteria
 
-- Admins can register and list datasets, inspect items, create runs, inspect status,
+- [x] Admins can register and list datasets, inspect items, create runs, inspect status,
   page results, and compare runs from the same dataset.
-- Dataset and run records are tenant scoped; duplicate dataset name/version returns
+- [x] Dataset and run records are tenant scoped; duplicate dataset name/version returns
   a conflict; pagination follows existing keyset conventions.
-- Run configuration, model identities, parameters, judge hash, and progress/error
+- [x] Run configuration, model identities, parameters, judge hash, and progress/error
   state are persisted. Worker execution derives tenant context from the run row.
-- Worker failures/retries, result persistence, cost ledger rows, and API integration
+- [x] Worker failures/retries, result persistence, cost ledger rows, and API integration
   tests are complete before this task is marked done.
 
 ## Current implementation
 
-The API foundation, tenant-safe registration checks, and a Celery worker are
-implemented. The worker persists retrieval results and progress but marks every
-run `incomplete` until answer generation/judging and cost-ledger accounting are
-wired; full database integration and retry tests remain pending.
+The API and worker now persist immutable dataset identity, production-path
+generation and versioned Haiku judging results, citations, quality, abstention,
+and authorization metrics. Results are idempotent across task redelivery and
+item failures remain explicit in the run. Disposable-Postgres integration
+evidence is complete: the full integration marker passed against Podman-managed
+Postgres, Redis, and stub inference after a fresh migration and seed.
 
 ## Out of scope
 
@@ -39,10 +41,10 @@ rewrites of released migrations.
 
 ## Verification
 
-Run Ruff, mypy, OpenAPI/type generation, API contract tests, and disposable Postgres
-integration tests once worker execution is added.
+Focused worker/API/judge tests, Ruff, mypy, OpenAPI/type generation, offline
+migration SQL generation, and the disposable Postgres integration suite pass.
 
 ## Rollback
 
-Revert the API and contract changes. No migration has been added by the current
-foundation work.
+Revert the API, worker, contract, model, and additive `0005_eval_execution`
+migration changes. No production database was modified by this implementation.

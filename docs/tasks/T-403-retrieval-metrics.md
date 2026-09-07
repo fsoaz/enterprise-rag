@@ -4,10 +4,10 @@
 | --- | --- |
 | ID | T-403 |
 | Phase | 4 — Evaluation |
-| Status | in_progress |
+| Status | done |
 | Branch | feat/T-403-retrieval-metrics |
 | Depends on | T-402 |
-| Blocks | T-406, T-407 |
+| Blocks | T-407 |
 
 ## Goal
 
@@ -17,15 +17,15 @@ label handling.
 
 ## Acceptance criteria
 
-- Recall, precision, nDCG, and MRR are computed at k=10 with duplicate retrieved
+- [x] Recall, precision, nDCG, and MRR are computed at k=10 with duplicate retrieved
   versions removed before scoring.
-- Aggregates are available overall, by slice, and by language; empty gold sets
+- [x] Aggregates are available overall, by slice, and by language; empty gold sets
   are handled explicitly rather than inflating quality.
-- Dataset validation runs before retrieval; missing labels, users, versions, or
+- [x] Dataset validation runs before retrieval; missing labels, users, versions, or
   incomplete items fail with an explicit error.
-- Deterministic metric tests cover duplicate versions, multi-label gold, empty
+- [x] Deterministic metric tests cover duplicate versions, multi-label gold, empty
   gold, ranking order, and per-group aggregation.
-- Production `retrieve()` remains the measured path; no quality baseline or model
+- [x] Production `retrieve()` remains the measured path; no quality baseline or model
   identity is changed by this task.
 
 ## Out of scope
@@ -35,8 +35,8 @@ calls, and changing production retrieval defaults.
 
 ## Verification
 
-Run Ruff, mypy, the focused metrics tests, and the full deterministic suite. Record
-that real-model quality and latency remain unmeasured.
+Focused metrics/dataset tests, Ruff, mypy, and the production-path evaluation
+worker checks pass. Real-model quality and latency remain unmeasured.
 
 ## Rollback
 

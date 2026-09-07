@@ -6,12 +6,15 @@ context from the database row rather than accepting it from a task payload.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
 from celery import Celery
+from evals.harness.compare import ComparisonError, build_report
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, BeforeValidator, Field
 from sqlalchemy import func, select
@@ -29,19 +32,42 @@ router = APIRouter(prefix="/evals", tags=["evaluation"])
 
 
 class EvalItemIn(BaseModel):
+    model_config = {"extra": "forbid"}
+    id: str | None = Field(default=None, min_length=1, max_length=200)
+    slice: str | None = Field(default=None, min_length=1, max_length=100)
     question: str = Field(min_length=1, max_length=16_000)
-    expected_facts: list[str] = Field(default_factory=list, max_length=50)
-    gold_chunk_ids: list[UUID] = Field(default_factory=list, max_length=50)
+    expected_answer_facts: list[str] = Field(default_factory=list, max_length=50)
+    expected_facts: list[str] | None = Field(default=None, max_length=50)
+    gold_chunk_ids: list[UUID | str] = Field(default_factory=list, max_length=50)
+    must_exclude_chunk_ids: list[UUID | str] = Field(default_factory=list, max_length=50)
+    language: str = Field(default="en", pattern="^(en|pt)$")
     as_of: Annotated[datetime | None, BeforeValidator(parse_as_of)] = None
     acting_user_id: UUID | None = None
+    acting_user: str | None = Field(default=None, max_length=200)
     should_abstain: bool = False
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.expected_facts is not None:
+            if self.expected_answer_facts:
+                raise ValueError("use only expected_answer_facts or expected_facts")
+            self.expected_answer_facts = self.expected_facts
+        if set(self.gold_chunk_ids).intersection(self.must_exclude_chunk_ids):
+            raise ValueError("gold and excluded chunks must be disjoint")
 
 
 class DatasetCreate(BaseModel):
+    model_config = {"extra": "forbid"}
     name: str = Field(min_length=1, max_length=200)
     version: str = Field(min_length=1, max_length=100)
     dataset_slice: str | None = Field(default=None, max_length=100)
     items: list[EvalItemIn] = Field(min_length=1, max_length=10_000)
+
+    def model_post_init(self, __context: Any) -> None:
+        for item in self.items:
+            if item.gold_chunk_ids and item.should_abstain:
+                raise ValueError("abstaining items cannot declare gold chunks")
+            if item.gold_chunk_ids and not item.expected_answer_facts:
+                raise ValueError("supported items must declare expected answer facts")
 
 
 class DatasetOut(BaseModel):
@@ -51,6 +77,7 @@ class DatasetOut(BaseModel):
     dataset_slice: str | None
     item_count: int
     created_at: datetime
+    content_sha256: str | None = None
 
 
 class DatasetPage(BaseModel):
@@ -60,12 +87,18 @@ class DatasetPage(BaseModel):
 
 class ItemOut(BaseModel):
     id: UUID
+    external_id: str
+    slice: str
     question: str
-    expected_facts: list[Any]
+    expected_answer_facts: list[Any]
+    language: str
     gold_chunk_ids: list[UUID] | None
+    gold_chunk_labels: list[str] | None
     as_of: datetime | None
     acting_user_id: UUID | None
     should_abstain: bool
+    must_exclude_chunk_ids: list[UUID] | None
+    must_exclude_chunk_labels: list[str] | None
 
 
 class ItemPage(BaseModel):
@@ -106,6 +139,7 @@ class ResultOut(BaseModel):
     retrieved_chunk_ids: list[UUID] | None
     metrics: dict[str, Any]
     answer_text: str | None
+    citations: list[dict[str, Any]] | None
     verdict: str | None
     cost_usd: str | None
 
@@ -113,6 +147,27 @@ class ResultOut(BaseModel):
 class ResultPage(BaseModel):
     data: list[ResultOut]
     next_cursor: str | None
+
+
+class ComparisonRunOut(BaseModel):
+    id: UUID
+    dataset_id: UUID
+    strategy: str
+    embedding_model: str
+    reranker: str | None
+    generator_model: str
+    status: str
+    params: dict[str, Any]
+
+
+class ComparisonResponse(BaseModel):
+    baseline_run_id: UUID
+    runs: list[ComparisonRunOut]
+    dataset: dict[str, Any]
+    overall: dict[str, dict[str, dict[str, Any]]]
+    by_slice: dict[str, dict[str, dict[str, dict[str, Any]]]]
+    coverage: dict[str, Any]
+    statistics: dict[str, Any]
 
 
 def _run_out(run: EvalRun) -> RunOut:
@@ -135,12 +190,48 @@ def _run_out(run: EvalRun) -> RunOut:
     )
 
 
+def _split_sources(values: list[UUID | str]) -> tuple[list[UUID], list[str]]:
+    ids: list[UUID] = []
+    labels: list[str] = []
+    for value in values:
+        if isinstance(value, UUID):
+            ids.append(value)
+            continue
+        try:
+            ids.append(UUID(value))
+        except ValueError:
+            labels.append(value)
+    return ids, labels
+
+
 @router.post("/datasets", response_model=DatasetOut, status_code=201)
 async def register_dataset(
     body: DatasetCreate,
     user: AclAdminUser,
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> DatasetOut:
+    item_ids = [item.id or str(index) for index, item in enumerate(body.items)]
+    if len(set(item_ids)) != len(item_ids):
+        raise ConflictError("Dataset item ids must be unique")
+    subjects = {item.acting_user for item in body.items if item.acting_user is not None}
+    if any(item.acting_user is not None and item.acting_user_id is not None for item in body.items):
+        raise ConflictError("Provide acting_user or acting_user_id, not both")
+    if subjects:
+        subject_rows = (
+            await session.scalars(
+                select(User).where(
+                    User.tenant_id == user.tenant_id,
+                    User.external_subject.in_(subjects),
+                )
+            )
+        ).all()
+        subject_map = {row.external_subject: row.id for row in subject_rows}
+        if set(subject_map) != subjects:
+            raise ConflictError("Every acting user must belong to the current tenant")
+        for item in body.items:
+            if item.acting_user is not None:
+                item.acting_user_id = subject_map[item.acting_user]
+
     acting_users = {item.acting_user_id for item in body.items if item.acting_user_id is not None}
     if acting_users:
         valid_users = set(
@@ -154,7 +245,32 @@ async def register_dataset(
         )
         if valid_users != acting_users:
             raise ConflictError("Every acting user must belong to the current tenant")
-    gold_chunks = {chunk_id for item in body.items for chunk_id in item.gold_chunk_ids}
+    source_ids: set[UUID] = set()
+    source_labels: set[str] = set()
+    for item in body.items:
+        item_gold_ids, item_gold_labels = _split_sources(item.gold_chunk_ids)
+        item_excluded_ids, item_excluded_labels = _split_sources(item.must_exclude_chunk_ids)
+        source_ids.update((*item_gold_ids, *item_excluded_ids))
+        source_labels.update((*item_gold_labels, *item_excluded_labels))
+    if source_labels:
+        from evals.harness.corpus import resolve_existing_labels
+
+        resolved_labels = await resolve_existing_labels(session, tenant_id=user.tenant_id)
+        missing = source_labels - resolved_labels.keys()
+        if missing:
+            raise ConflictError(f"Unknown evaluation source labels: {sorted(missing)}")
+        label_versions = [resolved_labels[label] for label in source_labels]
+        source_ids.update(
+            (
+                await session.scalars(
+                    select(Chunk.id).where(
+                        Chunk.tenant_id == user.tenant_id,
+                        Chunk.document_version_id.in_(label_versions),
+                    )
+                )
+            ).all()
+        )
+    gold_chunks = source_ids
     if gold_chunks:
         valid_chunks = set(
             (
@@ -172,6 +288,13 @@ async def register_dataset(
         name=body.name,
         version=body.version,
         dataset_slice=body.dataset_slice,
+        content_sha256=hashlib.sha256(
+            json.dumps(
+                [item.model_dump(exclude_none=True, mode="json") for item in body.items],
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest(),
     )
     session.add(dataset)
     try:
@@ -181,14 +304,22 @@ async def register_dataset(
         raise ConflictError(
             "An evaluation dataset with this name and version already exists"
         ) from exc
-    for item in body.items:
+    for item, external_id in zip(body.items, item_ids, strict=True):
+        gold_ids, gold_labels = _split_sources(item.gold_chunk_ids)
+        excluded_ids, excluded_labels = _split_sources(item.must_exclude_chunk_ids)
         session.add(
             EvalItem(
                 tenant_id=user.tenant_id,
                 dataset_id=dataset.id,
+                external_id=external_id,
+                item_slice=item.slice or body.dataset_slice or "default",
                 question=item.question,
-                expected_facts=item.expected_facts,
-                gold_chunk_ids=item.gold_chunk_ids or None,
+                language=item.language,
+                expected_facts=item.expected_answer_facts,
+                gold_chunk_ids=gold_ids or None,
+                gold_chunk_labels=gold_labels or None,
+                must_exclude_chunk_ids=excluded_ids or None,
+                must_exclude_chunk_labels=excluded_labels or None,
                 as_of=item.as_of,
                 acting_user_id=item.acting_user_id,
                 should_abstain=item.should_abstain,
@@ -202,6 +333,7 @@ async def register_dataset(
         dataset_slice=dataset.dataset_slice,
         item_count=len(body.items),
         created_at=dataset.created_at,
+        content_sha256=dataset.content_sha256,
     )
 
 
@@ -244,6 +376,7 @@ async def list_datasets(
                 dataset_slice=row.dataset_slice,
                 item_count=int(counts.get(row.id, 0)),
                 created_at=row.created_at,
+                content_sha256=row.content_sha256,
             )
             for row in rows
         ],
@@ -289,12 +422,18 @@ async def list_items(
         data=[
             ItemOut(
                 id=row.id,
+                external_id=row.external_id,
+                slice=row.item_slice,
                 question=row.question,
-                expected_facts=list(row.expected_facts or []),
+                expected_answer_facts=list(row.expected_facts or []),
+                language=row.language,
                 gold_chunk_ids=row.gold_chunk_ids,
+                gold_chunk_labels=row.gold_chunk_labels,
                 as_of=row.as_of,
                 acting_user_id=row.acting_user_id,
                 should_abstain=row.should_abstain,
+                must_exclude_chunk_ids=row.must_exclude_chunk_ids,
+                must_exclude_chunk_labels=row.must_exclude_chunk_labels,
             )
             for row in rows
         ],
@@ -324,6 +463,15 @@ async def create_run(
     )
     if dataset is None:
         raise NotFoundError("Evaluation dataset not found")
+    run_params = dict(body.params)
+    immutable_config = {
+        "embedding_model_name": body.embedding_model,
+        "reranker_identity": body.reranker,
+    }
+    for key, expected in immutable_config.items():
+        if key in run_params and run_params[key] != expected:
+            raise ConflictError(f"Run parameter {key} must match the run model identity")
+        run_params[key] = expected
     run = EvalRun(
         tenant_id=user.tenant_id,
         dataset_id=dataset.id,
@@ -331,7 +479,7 @@ async def create_run(
         embedding_model=body.embedding_model,
         reranker=body.reranker,
         generator_model=body.generator_model,
-        params={**body.params, "status": "queued", "progress": 0},
+        params={**run_params, "status": "queued", "progress": 0},
         judge_prompt_hash=body.judge_prompt_hash,
         started_at=datetime.now(UTC),
     )
@@ -343,6 +491,87 @@ async def create_run(
         run.params = {**run.params, "status": "failed", "error": str(exc)}
         await session.flush()
     return _run_out(run)
+
+
+async def _comparison_report(
+    ids: list[UUID], user: AclAdminUser, session: AsyncSession
+) -> dict[str, Any]:
+    if len(ids) < 2:
+        raise ConflictError("At least two run ids are required for comparison")
+    if len(set(ids)) != len(ids):
+        raise ConflictError("Comparison run ids must be unique")
+    rows = (
+        await session.scalars(
+            select(EvalRun).where(EvalRun.id.in_(ids), EvalRun.tenant_id == user.tenant_id)
+        )
+    ).all()
+    by_id = {row.id: row for row in rows}
+    missing_ids = [str(run_id) for run_id in ids if run_id not in by_id]
+    if missing_ids:
+        raise NotFoundError(f"Evaluation run not found: {', '.join(missing_ids)}")
+    ordered_runs = [by_id[run_id] for run_id in ids]
+    dataset_ids = {run.dataset_id for run in ordered_runs}
+    if len(dataset_ids) != 1:
+        raise ConflictError("Runs use incompatible datasets")
+    dataset_id = ordered_runs[0].dataset_id
+    dataset = await session.scalar(
+        select(EvalDataset).where(
+            EvalDataset.id == dataset_id, EvalDataset.tenant_id == user.tenant_id
+        )
+    )
+    if dataset is None:
+        raise NotFoundError("Evaluation dataset not found")
+    items = (
+        await session.scalars(
+            select(EvalItem)
+            .where(EvalItem.dataset_id == dataset_id, EvalItem.tenant_id == user.tenant_id)
+            .order_by(EvalItem.created_at, EvalItem.id)
+        )
+    ).all()
+    result_rows = (
+        await session.scalars(
+            select(EvalResult)
+            .where(
+                EvalResult.run_id.in_(ids),
+                EvalResult.tenant_id == user.tenant_id,
+            )
+            .order_by(EvalResult.created_at, EvalResult.id)
+        )
+    ).all()
+    grouped: dict[str, list[EvalResult]] = {str(run_id): [] for run_id in ids}
+    for result in result_rows:
+        grouped[str(result.run_id)].append(result)
+    try:
+        report = build_report(
+            ordered_runs,
+            items,
+            grouped,
+            baseline_id=str(ids[0]),
+        )
+    except ComparisonError as exc:
+        raise ConflictError(str(exc)) from exc
+    report["dataset"].update(
+        {
+            "name": dataset.name,
+            "version": dataset.version,
+            "dataset_slice": dataset.dataset_slice,
+            "content_sha256": dataset.content_sha256,
+        }
+    )
+    return report
+
+
+@router.get("/runs/compare", response_model=ComparisonResponse)
+async def compare_runs_matrix(
+    ids: Annotated[str, Query(min_length=1, max_length=2000)],
+    user: AclAdminUser,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> ComparisonResponse:
+    try:
+        run_ids = [UUID(value.strip()) for value in ids.split(",") if value.strip()]
+    except ValueError as exc:
+        raise ConflictError("ids must be a comma-separated list of UUIDs") from exc
+    return ComparisonResponse(**(await _comparison_report(run_ids, user, session)))
 
 
 @router.get("/runs/{run_id}", response_model=RunOut)
@@ -399,6 +628,7 @@ async def list_results(
                 retrieved_chunk_ids=row.retrieved_chunk_ids,
                 metrics=dict(row.metrics or {}),
                 answer_text=row.answer_text,
+                citations=row.citations,
                 verdict=row.verdict,
                 cost_usd=str(row.cost_usd) if row.cost_usd is not None else None,
             )
@@ -415,6 +645,9 @@ async def compare_runs(
     user: AclAdminUser,
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> dict[str, Any]:
+    # Compatibility endpoint retained for clients written against T-405.  The
+    # canonical matrix endpoint above is strict about terminal complete runs and
+    # exact result coverage; this endpoint keeps its original lightweight shape.
     runs = (
         await session.scalars(
             select(EvalRun).where(
@@ -428,9 +661,9 @@ async def compare_runs(
     if left.dataset_id != right.dataset_id:
         raise ConflictError("Runs use incompatible datasets")
     return {
-        "left_run_id": str(left.id),
-        "right_run_id": str(right.id),
         "compatible": True,
+        "left_run_id": str(left_id),
+        "right_run_id": str(right_id),
         "left": dict(left.params or {}),
         "right": dict(right.params or {}),
     }

@@ -21,7 +21,9 @@ A RAG system fails quietly. Retrieval gets slightly worse, an ACL filter is drop
 | **Eval** | Offline quality gates on the golden set | smoke < 5 min / full ~30 min | Smoke per PR, full nightly |
 | **Load** | k6 against staging | ~15 min | Pre-release |
 
-Tiers run in this order in CI. A failure in an earlier tier short-circuits the rest.
+The table describes the target test strategy, including tiers not yet automated.
+The current CI jobs run independently, without sequential `needs` dependencies.
+See [§ 12](#12-ci-pipeline) for implemented jobs and remaining gaps.
 
 ## 2. Coverage
 
@@ -33,7 +35,11 @@ Tiers run in this order in CI. A failure in an earlier tier short-circuits the r
 | `packages/llm` | 85% | Provider calls are mocked; the wrapper logic is testable |
 | `packages/*` overall | 85% | |
 | `apps/*` | 75% | Thin routers; the logic lives in packages |
-| Whole repo | 75% | Gate |
+| Whole repo | 75% | Target |
+
+These Python coverage thresholds are targets; the current CI pytest commands do
+not collect coverage or enforce them. Frontend coverage is enforced separately
+by Vitest; see [§ 3.1](#31-frontend-tests).
 
 Coverage is a floor, not a goal. A 95% number with no test for "user B cannot see user A's document" is worthless. Reviewers check what is tested, not how much.
 
@@ -195,7 +201,15 @@ Capture structured log output during an integration run and assert absence of: d
 
 ### 6.5 Dependency & secret scanning
 
-`pip-audit`, `npm audit`, and `gitleaks` run in CI. High-severity advisories and any detected secret block the merge.
+Dependency and secret scanning are required review practices, but `pip-audit`,
+`npm audit`, and `gitleaks` are not configured in
+[the repository CI workflow](../../.github/workflows/ci.yml). No tracked
+pre-commit hook configuration supplies them either. Do not rely on CI to detect
+secrets, dependency advisories, or undocumented environment variables.
+
+Record actual scan commands, dates, results, and unresolved advisories when a
+scan is performed. [VERIFY] External repository security settings and scanners
+cannot be confirmed from the checked-in configuration.
 
 ## 7. Eval Tests
 
@@ -349,9 +363,11 @@ grants (R-029, R-071).
 ## 12. CI Pipeline
 
 ```text
-per commit:  lint → typecheck (+ contract) → unit → web-test → integration-db → build → e2e
-nightly:     eval-full → adversarial
-pre-release: eval-full → adversarial → load
+Implemented on main pushes and pull requests (independent jobs):
+lint | typecheck (+ contract + Next build) | unit | web-test | integration-db | container-build
+
+Evaluation workflows:
+eval-smoke | scheduled eval-full | e2e | adversarial | pre-release load
 ```
 
 | Stage | Job | Blocks merge | Notes |
@@ -364,15 +380,20 @@ pre-release: eval-full → adversarial → load
 | integration | `integration-db` | Yes | Postgres + Redis services, `enterprise_rag_test`, plus a real `inference` process on `INFERENCE_BACKEND=stub` |
 | migrations | `integration-db` | Yes | `upgrade head` → `downgrade -1` → `upgrade head` → seed, from an empty database |
 | **security** (deterministic) | `unit` / `integration-db` | Yes | Never skipped. Fully mocked — no live model call, which is what makes it a legitimate gate. |
-| eval-smoke | — | — | **Not wired (R-031).** The only remaining hole in this table |
-| build | — | — | Not wired as a separate job; `next build` runs in `typecheck` |
+| eval-smoke | `eval-smoke` | Yes | Pull requests; deterministic 48-item stub-inference run across all eight slices, compared with `evals/baselines/t407-smoke.json`. Hosted first-green evidence is pending for R-031. |
+| build | `container-build` | See note below | Builds API/worker, inference, and web images; checks Compose configuration. `next build` also runs in `typecheck`. No image publishing or deployment. |
 | e2e | — | — | Not wired |
-| eval-full | — | No (reports) | Nightly; not wired |
+| eval-full | `eval-full` | No (reports) | Scheduled full 320-item, eight-slice run with four configured strategies; retains the report and makes no paid model calls. |
 | **adversarial** (probabilistic) | — | **No** | Nightly and pre-release. Blocks **release**, not merge — see § 7.5. Not wired |
 | load | — | No | Pre-release, manual |
 
-Rows without a job do not exist. They are kept in the table because the gap is the point:
-a CI table that lists only what is implemented cannot show what is missing.
+Rows without a job do not exist. They remain in the table when they describe an intentional
+future gap, such as e2e, adversarial, or load testing. The evaluation rows above are now
+wired; their hosted execution evidence is tracked in [T-407](../tasks/T-407-ci-evaluation-gates.md)
+and [E-012](../execution/test_evidence.md).
+
+“Blocks merge” is the intended repository policy. [VERIFY] Actual required status
+checks depend on hosted branch-protection settings, which are not in this repository.
 
 **Two changes closed the failures recorded against this job.** `integration-db` now starts
 a real `inference` process and waits on `/ready` before the suite runs, which resolves the

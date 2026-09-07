@@ -13,7 +13,7 @@ Rules here are enforced by tooling wherever possible. A rule that cannot be enfo
 | --- | --- | --- |
 | `api`, `worker`, `inference`, `packages/*` | Python 3.12 | `.python-version`, `pyproject.toml` |
 | `web` | Node 22 LTS, TypeScript 5.x | `.nvmrc`, `package.json` |
-| Database | PostgreSQL 16 + pgvector ≥ 0.7 | Compose image tag, Terraform |
+| Database | PostgreSQL 16 + pgvector | `infra/compose/docker-compose.yml` |
 
 No compatibility shims for older runtimes. If a dependency requires an older Python, replace the dependency.
 
@@ -22,31 +22,31 @@ No compatibility shims for older runtimes. If a dependency requires an older Pyt
 | Concern | Tool | Config |
 | --- | --- | --- |
 | Python packaging & deps | `uv` | `pyproject.toml`, `uv.lock` committed |
-| Python lint + format | `ruff` (both) | `ruff.toml` |
-| Python types | `mypy` | `--strict` on `packages/`, standard on `apps/` |
+| Python lint + format | `ruff` (both) | `pyproject.toml` |
+| Python types | `mypy` | `pyproject.toml`, strict on packages and apps |
 | Python import boundaries | `import-linter` | `.importlinter` |
-| TS lint + format | `biome` | `biome.json` |
-| TS types | `tsc --noEmit` | `tsconfig.json`, `strict: true` |
+| TS lint + format | `biome` | `apps/web/biome.json` |
+| TS types | `tsc --noEmit` | `apps/web/tsconfig.json`, `strict: true` |
 | Migrations | Alembic | `packages/db/migrations/` |
 | Python tests | `pytest` | see [testing.md](./testing.md) |
 | Frontend tests | `vitest` + Testing Library + jsdom | `apps/web/vitest.config.ts` |
 | Generated API types | `openapi-typescript` | `npm run generate:api-types` → `src/lib/generated/api.ts` |
-| Hooks | `pre-commit` | format, lint, secret scan, migration check |
+| Hooks | Not configured in this repository | Run the documented checks before submitting a PR |
 
 `black`, `isort`, `flake8`, `eslint`, and `prettier` are **not** used — `ruff` and `biome` replace them. Do not add them back. `jest` is likewise not used; `vitest` is the frontend runner.
 
-**`src/lib/generated/` is output, not source.** Edit `openapi.json` upstream and regenerate; CI runs the generator and fails on any diff, so a hand-edit is reverted by the next run rather than surviving as an untracked local behavior.
+**`apps/web/src/lib/generated/` and both OpenAPI JSON files are generated output.** Change the FastAPI routes or Pydantic models first. Do not hand-edit schemas or generated types.
 
-After an OpenAPI change, regenerate the frontend types using the lockfile-pinned toolchain, then commit the output:
+After an API change, run from the repository root:
 
 ```bash
-cd apps/web
-npm ci
-npm run generate:api-types
-git diff --exit-code src/lib/generated/api.ts
+make openapi openapi-check
+npm ci --prefix apps/web
+npm run generate:api-types --prefix apps/web
+git diff -- openapi.json apps/web/openapi.json apps/web/src/lib/generated/api.ts
 ```
 
-Use `npm ci`, not `npm install`: CI resolves `openapi-typescript` from `package-lock.json`, and a different generator version can produce a spurious generated-file diff. Commit `src/lib/generated/api.ts` when the command changes it.
+Use `npm ci`: CI resolves `openapi-typescript` from `package-lock.json`. Review and commit all changed generated files with the source change. CI checks both schemas against FastAPI and regenerates frontend types to detect drift.
 
 ## 3. Repository Layout
 
@@ -183,10 +183,10 @@ A FastAPI exception handler maps each to an RFC 7807 response per [api_rules.md 
 
 ## 8. Configuration & Secrets
 
-- 12-factor: all configuration comes from environment variables, read through a single `pydantic-settings` object per app. No `os.environ` scattered through the codebase.
-- `.env.example` lists every variable with a comment and a safe placeholder. Adding a variable without updating it fails CI.
-- **No secret is ever committed.** `gitleaks` runs in pre-commit and in CI.
-- Local secrets live in `.env` (gitignored). Cloud secrets live in AWS Secrets Manager, injected at task start.
+- Document configuration changes in the appropriate `.env.example`, with a comment and a safe placeholder. Reviewers enforce this requirement; CI does not check environment-variable documentation coverage.
+- API settings and worker broker settings use `pydantic-settings`; inference and several shared libraries read process environment directly. Follow [local configuration loading](../guides/local-development.md#configuration-loading) when starting processes outside Compose.
+- **Never commit secrets.** Secret scanning is not configured in the repository's CI or pre-commit hooks. See [scanning status](testing.md#65-dependency--secret-scanning).
+- Local secrets live in ignored `.env` or `.env.local` files. AWS Secrets Manager is part of the [proposed cloud design](../context/architecture.md#172-cloud--aws), not provisioned infrastructure.
 - Secrets are never logged, never included in error messages, and never returned by an API endpoint.
 
 ## 9. Logging
@@ -210,7 +210,7 @@ A test in the security suite asserts these do not appear in captured log output.
 
 Trunk-based. `main` is always deployable. Feature branches are short-lived and named `<type>/<task-id>-<slug>` — e.g. `feat/T-205-rrf-fusion`.
 
-No direct pushes to `main`. Branch protection requires a green CI run and one review.
+Do not push directly to `main`; require a green CI run and one review. [VERIFY] Hosted branch-protection settings are not available in the repository, so enforcement of this policy is unconfirmed.
 
 ### 10.2 Commits
 
@@ -246,8 +246,8 @@ One task per PR. A PR that touches three unrelated areas gets split.
 - A new dependency requires a note in the task file: what it does, why the standard library or an existing dependency is insufficient, and its maintenance status.
 - Prefer the standard library. Prefer a well-maintained small library over a framework.
 - Lockfiles (`uv.lock`, `package-lock.json`) are committed and updated deliberately, never regenerated as a side effect.
-- `pip-audit` and `npm audit` run in CI. High-severity advisories block the merge.
-- **The gate is on the production tree.** `npm audit --omit=dev` is what blocks; the full audit currently reports four high-severity advisories reachable only through the `openapi-typescript` generation chain, which runs on a developer machine and in CI and ships in nothing. Forcing overrides there breaks the generator. A dev-only advisory is recorded and reviewed, not force-resolved into a broken toolchain — but "dev-only" is a claim that has to be checked against the dependency path each time, not assumed from the section of `package.json` it appears in.
+- Dependency audits are required review work, but are not automated merge gates in this repository. See [scanning status](testing.md#65-dependency--secret-scanning).
+- Assess production and development dependency paths separately. Record unresolved advisories and their impact; do not assume a development dependency is harmless or force overrides that break the toolchain. Historical audit counts are not evidence of current dependency safety.
 
 ## 12. Documentation
 

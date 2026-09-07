@@ -318,3 +318,119 @@ jobs:
             NEXT_PUBLIC_DEV_AUTH=false
           cache-from: type=gha,scope=dockerfile-web
           cache-to: type=gha,mode=max,scope=dockerfile-web
+
+  eval-smoke:
+    name: Evaluation smoke gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: enterprise_rag_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d enterprise_rag_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@localhost:5432/enterprise_rag_test
+      DATABASE_URL_SYNC: postgresql+psycopg://rag_app:rag_app@localhost:5432/enterprise_rag_test
+      DATABASE_URL_MIGRATE: postgresql+psycopg://rag_migrate:rag_migrate@localhost:5432/enterprise_rag_test
+      DATABASE_URL_MAINT: postgresql+asyncpg://rag_maint:rag_maint@localhost:5432/enterprise_rag_test
+      REDIS_URL: redis://localhost:6379/0
+      CELERY_BROKER_URL: redis://localhost:6379/1
+      CELERY_RESULT_BACKEND: redis://localhost:6379/2
+      INFERENCE_BASE_URL: http://127.0.0.1:8001
+      INFERENCE_SERVICE_TOKEN: ci-inference-token
+      INFERENCE_BACKEND: stub
+      INFERENCE_DEVICE: cpu
+      DEV_AUTH_BYPASS: "true"
+      ANTHROPIC_API_KEY: sk-ant-replace-me
+      OIDC_ISSUER: http://localhost:8080/realms/enterprise-rag
+      OIDC_AUDIENCE: enterprise-rag-api
+      OIDC_JWKS_URL: http://localhost:8080/realms/enterprise-rag/protocol/openid-connect/certs
+      TENANT_DAILY_BUDGET_USD: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python deps
+        run: uv sync --all-packages --group dev
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Initialize roles and migrate
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d enterprise_rag_test -f infra/compose/postgres/init.sql
+          uv run alembic -c packages/db/alembic.ini upgrade head
+          uv run python -m db.seed
+
+      - name: Start inference, API, and worker
+        run: |
+          set -euo pipefail
+          uv run uvicorn inference.main:app --host 127.0.0.1 --port 8001 > "$RUNNER_TEMP/inference.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/inference.pid"
+          for attempt in {1..30}; do
+            curl --fail --silent http://127.0.0.1:8001/ready >/dev/null && break
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8001/ready >/dev/null
+
+          uv run uvicorn api.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/api.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/api.pid"
+          for attempt in {1..30}; do
+            curl --fail --silent http://127.0.0.1:8000/health >/dev/null && break
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8000/health >/dev/null
+
+          uv run celery -A worker.celery_app.celery_app worker --loglevel=INFO --concurrency=2 \
+            > "$RUNNER_TEMP/worker.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/worker.pid"
+
+      - name: Run real production-path smoke comparison
+        run: uv run python -m evals.harness.ci --mode smoke --output "$RUNNER_TEMP/eval-smoke.json"
+
+      - name: Enforce smoke regression thresholds
+        run: >-
+          uv run python -m evals.harness.gate
+          --report "$RUNNER_TEMP/eval-smoke.json"
+          --baseline evals/baselines/t407-smoke.json
+          --output "$RUNNER_TEMP/eval-gate.json"
+
+      - name: Publish smoke report and gate result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-smoke-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/eval-smoke.json
+            ${{ runner.temp }}/eval-gate.json
+            ${{ runner.temp }}/inference.log
+            ${{ runner.temp }}/api.log
+            ${{ runner.temp }}/worker.log
+          if-no-files-found: warn
+
+      - name: Service logs on failure
+        if: failure()
+        run: |
+          cat "$RUNNER_TEMP/inference.log" || true
+          cat "$RUNNER_TEMP/api.log" || true
+          cat "$RUNNER_TEMP/worker.log" || true
