@@ -204,6 +204,25 @@ def _split_sources(values: list[UUID | str]) -> tuple[list[UUID], list[str]]:
     return ids, labels
 
 
+def _dataset_content_sha256(items: list[EvalItemIn]) -> str:
+    """Hash the validated request content before resolving database identities."""
+    serialized_items = []
+    for item in items:
+        serialized = item.model_dump(exclude_none=True, mode="json")
+        if item.acting_user is not None:
+            # The API resolves symbolic subjects to tenant-local UUIDs below;
+            # those internal identities must not affect dataset compatibility.
+            serialized.pop("acting_user_id", None)
+        serialized_items.append(serialized)
+    return hashlib.sha256(
+        json.dumps(
+            serialized_items,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+
 @router.post("/datasets", response_model=DatasetOut, status_code=201)
 async def register_dataset(
     body: DatasetCreate,
@@ -213,6 +232,7 @@ async def register_dataset(
     item_ids = [item.id or str(index) for index, item in enumerate(body.items)]
     if len(set(item_ids)) != len(item_ids):
         raise ConflictError("Dataset item ids must be unique")
+    content_sha256 = _dataset_content_sha256(body.items)
     subjects = {item.acting_user for item in body.items if item.acting_user is not None}
     if any(item.acting_user is not None and item.acting_user_id is not None for item in body.items):
         raise ConflictError("Provide acting_user or acting_user_id, not both")
@@ -288,13 +308,7 @@ async def register_dataset(
         name=body.name,
         version=body.version,
         dataset_slice=body.dataset_slice,
-        content_sha256=hashlib.sha256(
-            json.dumps(
-                [item.model_dump(exclude_none=True, mode="json") for item in body.items],
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode()
-        ).hexdigest(),
+        content_sha256=content_sha256,
     )
     session.add(dataset)
     try:
