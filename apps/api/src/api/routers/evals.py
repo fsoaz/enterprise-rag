@@ -13,7 +13,7 @@ from uuid import UUID
 
 from celery import Celery
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,8 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.deps.auth import AclAdminUser
 from api.deps.db import get_db_session
 from api.pagination import apply_descending_cursor, page_limit, page_rows
-from db.models import EvalDataset, EvalItem, EvalResult, EvalRun
+from db.models import Chunk, EvalDataset, EvalItem, EvalResult, EvalRun, User
 from domain.errors import ConflictError, NotFoundError
+from domain.temporal import parse_as_of
 
 router = APIRouter(prefix="/evals", tags=["evaluation"])
 
@@ -31,7 +32,7 @@ class EvalItemIn(BaseModel):
     question: str = Field(min_length=1, max_length=16_000)
     expected_facts: list[str] = Field(default_factory=list, max_length=50)
     gold_chunk_ids: list[UUID] = Field(default_factory=list, max_length=50)
-    as_of: datetime | None = None
+    as_of: Annotated[datetime | None, BeforeValidator(parse_as_of)] = None
     acting_user_id: UUID | None = None
     should_abstain: bool = False
 
@@ -140,6 +141,32 @@ async def register_dataset(
     user: AclAdminUser,
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> DatasetOut:
+    acting_users = {item.acting_user_id for item in body.items if item.acting_user_id is not None}
+    if acting_users:
+        valid_users = set(
+            (
+                await session.scalars(
+                    select(User.id).where(
+                        User.id.in_(acting_users), User.tenant_id == user.tenant_id
+                    )
+                )
+            ).all()
+        )
+        if valid_users != acting_users:
+            raise ConflictError("Every acting user must belong to the current tenant")
+    gold_chunks = {chunk_id for item in body.items for chunk_id in item.gold_chunk_ids}
+    if gold_chunks:
+        valid_chunks = set(
+            (
+                await session.scalars(
+                    select(Chunk.id).where(
+                        Chunk.id.in_(gold_chunks), Chunk.tenant_id == user.tenant_id
+                    )
+                )
+            ).all()
+        )
+        if valid_chunks != gold_chunks:
+            raise ConflictError("Every gold chunk must belong to the current tenant")
     dataset = EvalDataset(
         tenant_id=user.tenant_id,
         name=body.name,

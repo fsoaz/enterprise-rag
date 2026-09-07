@@ -9,12 +9,12 @@
 
 | Field | Value |
 | --- | --- |
-| Task | T-404 — answer-quality judges |
-| File | [T-404-answer-judges.md](../tasks/T-404-answer-judges.md) |
-| Status | in_progress — API foundation implemented; worker execution pending |
-| Branch | `feat/T-404-answer-judges` |
-| Started | 2026-09-06 |
-| Base | `3a64aab` (clean before this task) |
+| Task | T-405 — evaluation persistence and API |
+| File | [T-405-eval-api.md](../tasks/T-405-eval-api.md) |
+| Status | in_progress — worker foundation implemented; answer/judging, ledger, retries, and integration pending |
+| Branch | `feat/T-405-eval-api` |
+| Started | 2026-09-07 |
+| Base | `5faa08b` (clean before this task) |
 
 Milestone A remains incomplete. The July 31 QA report records 21 defects fixed,
 two intentional behaviors, and one fixed regression. Those fixes are committed;
@@ -23,9 +23,9 @@ remains in the QA reports and evidence log. No new CI run has been confirmed.
 Live generation, judging, cost, and current retrieval quality remain unmeasured.
 
 R-070, R-030, T-401, T-402, T-403, and T-404 are implemented locally on stacked
-task branches. T-405 API foundation is implemented, but worker execution and
-immutable dataset persistence checks remain pending. See the dated evidence
-entries. Remaining sequence: complete T-405, then T-406–T-409,
+task branches. T-405 API and worker foundations are implemented, but production
+answer/judge execution, ledger accounting, and database integration remain
+pending. See the dated evidence entries. Remaining sequence: complete T-405, then T-406–T-409,
 T-406–T-409 comparisons/CI/experiments (including R-031), then release demonstration.
 Full eight-slice evaluation is required. Paid generation, judging, and expansion
 share a cumulative US$25 ceiling; no recurring nightly spend is authorized.

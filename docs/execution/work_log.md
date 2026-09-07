@@ -521,3 +521,12 @@ Moved entailment judging to the versioned `entailment_v1` rubric under
 strict parsing. Missing, duplicate, malformed, or out-of-range labels now produce
 an explicit incomplete result and cannot upgrade groundedness. Focused judge tests,
 Ruff, and mypy pass; no live judge call or paid spend occurred.
+
+## 2026-09-07 — T-405 worker foundation (in progress)
+
+Registered `worker.tasks.eval.run_eval`. It resolves tenant and dataset from the
+persisted run under the migration identity, runs retrieval for each item, writes
+per-item retrieval metrics/results, updates progress, and records explicit
+incomplete status when answer generation is unavailable. API registration now
+rejects cross-tenant acting users and gold chunks. Generation/judging, ledger
+accounting, retry semantics, and database integration remain open.

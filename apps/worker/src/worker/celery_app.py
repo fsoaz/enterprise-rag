@@ -23,7 +23,7 @@ celery_app = Celery(
     "enterprise_rag_worker",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["worker.tasks.noop", "worker.tasks.ingest"],
+    include=["worker.tasks.noop", "worker.tasks.ingest", "worker.tasks.eval"],
 )
 
 celery_app.conf.update(

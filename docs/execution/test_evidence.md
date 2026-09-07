@@ -658,3 +658,14 @@ Branch: `feat/T-404-answer-judges`, based on `2524eaa`. No paid model calls
 - Judge, fallback, groundedness tests: 10 passed. Ruff check/format and mypy
   pass. Full suite and CI remain separate evidence; no database or migration
   changed.
+
+## 2026-09-07 — T-405 worker foundation (local, incomplete)
+
+The Celery task `worker.tasks.eval.run_eval` is registered and covered by a
+worker registration test. It derives tenant context from the persisted run,
+persists retrieval-only `EvalResult` rows and progress, and marks runs incomplete
+with an explicit reason until answer generation and judging are available. API
+contract/worker tests: 4 passed after the worker change. Ruff, formatting, and
+mypy pass; OpenAPI and generated types were regenerated. No paid calls, CI result,
+or completed evaluation run. Retry, ledger, answer-path, and disposable database
+integration evidence remain pending.

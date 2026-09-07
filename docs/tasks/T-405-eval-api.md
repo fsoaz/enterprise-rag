@@ -27,8 +27,10 @@ with paginated items/results and compatible run comparison.
 
 ## Current implementation
 
-The API foundation and contract tests are implemented. Worker execution and full
-database integration remain pending and keep this task `in_progress`.
+The API foundation, tenant-safe registration checks, and a Celery worker are
+implemented. The worker persists retrieval results and progress but marks every
+run `incomplete` until answer generation/judging and cost-ledger accounting are
+wired; full database integration and retry tests remain pending.
 
 ## Out of scope
 
