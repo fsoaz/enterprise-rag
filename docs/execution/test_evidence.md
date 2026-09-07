@@ -599,3 +599,19 @@ Branch: `feat/T-401-fixture-corpus`, based on `3a64aab`. No paid model calls
   or evaluation baseline changed. Loading both tenants into disposable Postgres and
   worker embeddings is deferred to the evaluation database task; live quality remains
   unmeasured.
+
+## 2026-09-07 — T-402 golden datasets (local)
+
+Branch: `feat/T-402-golden-dataset`, based on `3404dc5`. No paid model calls
+(US$0 of the US$25 allowance), no CI result, and no quality metrics claimed.
+
+- `python -m evals.build_dataset --check`: verified 320 deterministic items.
+- All eight slices contain exactly 40 unique cases. `factual_pt` and
+  `factual_en` are language-pure; crosslingual contains 20 PT→EN and 20 EN→PT.
+- Versioned cases cover old (`2024-06-01`), half-open boundary (`2025-01-01`),
+  current omission, and absent pre-history (`2023-01-01`) behavior. Permission
+  cases contain both `acme-viewer` and `acme-member`; injection cases all carry
+  prohibited-source labels. Every source label resolves to T-401 manifests.
+- Dataset, manifest, privacy, reproducibility, and metrics tests: 10 passed.
+- Ruff check/format and mypy pass. Full suite remains to be rerun after this
+  task's final edits; integration and live model execution remain separate work.

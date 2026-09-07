@@ -9,10 +9,10 @@
 
 | Field | Value |
 | --- | --- |
-| Task | T-401 — synthetic fixture corpus |
-| File | [T-401-fixture-corpus.md](../tasks/T-401-fixture-corpus.md) |
+| Task | T-402 — golden dataset authoring |
+| File | [T-402-golden-dataset.md](../tasks/T-402-golden-dataset.md) |
 | Status | implemented locally; awaiting review and CI |
-| Branch | `feat/T-401-fixture-corpus` |
+| Branch | `feat/T-402-golden-dataset` |
 | Started | 2026-09-06 |
 | Base | `3a64aab` (clean before this task) |
 
@@ -22,8 +22,8 @@ the July 27 handoff's uncommitted-tree statement was stale. Historical evidence
 remains in the QA reports and evidence log. No new CI run has been confirmed.
 Live generation, judging, cost, and current retrieval quality remain unmeasured.
 
-R-070, R-030, and T-401 are implemented locally on stacked task branches; see the
-dated evidence entries. Remaining sequence: T-402–T-405 evaluation foundation,
+R-070, R-030, T-401, and T-402 are implemented locally on stacked task branches;
+see the dated evidence entries. Remaining sequence: T-403–T-405 evaluation foundation,
 T-406–T-409 comparisons/CI/experiments (including R-031), then release demonstration.
 Full eight-slice evaluation is required. Paid generation, judging, and expansion
 share a cumulative US$25 ceiling; no recurring nightly spend is authorized.

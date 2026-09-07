@@ -489,3 +489,11 @@ validation for hashes, safe paths, intervals, tenant groups, labels, and privacy
 Renderer, parser/chunker, manifest tests, Ruff, and mypy pass. Full suite: 122
 passed, 1 existing dependency skip, 19 integration deselections. No paid calls or
 CI evidence; database load remains for the evaluation foundation tasks.
+
+## 2026-09-07 — T-402 local implementation
+
+Generated the eight immutable golden JSONL slices from the T-401 catalog, exactly
+40 cases each. Added explicit labels, expected facts, PT/EN direction checks,
+version boundary/current/absent cases, acting users, prohibited sources, and
+abstention expectations. Dataset validation and reproducibility checks pass; no
+model calls, CI result, or quality score was produced.

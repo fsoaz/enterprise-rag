@@ -1,2 +1,40 @@
-{"id": "ua-001", "question": "What is the cafeteria lunch menu for next Tuesday?", "gold_chunk_ids": [], "expected_answer_facts": [], "should_abstain": true, "language": "en"}
-{"id": "ua-002", "question": "Qual o salário do CEO?", "gold_chunk_ids": [], "expected_answer_facts": [], "should_abstain": true, "language": "pt"}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-001", "language": "en", "question": "What is the cafeteria menu for Laboratory freezer alarms next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-002", "language": "pt", "question": "What is the cafeteria menu for Empréstimo de instrumentos next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-003", "language": "en", "question": "What is the cafeteria menu for Build artifact retention next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-004", "language": "pt", "question": "What is the cafeteria menu for Agendamento de docas next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-005", "language": "en", "question": "What is the cafeteria menu for Workshop ventilation next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-006", "language": "pt", "question": "What is the cafeteria menu for Revisão de traduções next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-007", "language": "en", "question": "What is the cafeteria menu for Test bench reservations next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-008", "language": "pt", "question": "What is the cafeteria menu for Expedição de amostras next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-009", "language": "en", "question": "What is the cafeteria menu for Simulation checkpoints next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-010", "language": "pt", "question": "What is the cafeteria menu for Inspeção de empilhadeiras next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-011", "language": "en", "question": "What is the cafeteria menu for Dataset labeling reviews next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-012", "language": "pt", "question": "What is the cafeteria menu for Acesso a protótipos next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-013", "language": "en", "question": "What is the cafeteria menu for Instrument warm-up next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-014", "language": "pt", "question": "What is the cafeteria menu for Digitalização de cadernos next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-015", "language": "en", "question": "What is the cafeteria menu for Spare battery rotation next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-016", "language": "pt", "question": "What is the cafeteria menu for Inscrição em treinamentos next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-017", "language": "en", "question": "What is the cafeteria menu for Map tile publication next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-018", "language": "pt", "question": "What is the cafeteria menu for Separação de embalagens next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-019", "language": "en", "question": "What is the cafeteria menu for Acoustic room booking next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-020", "language": "pt", "question": "What is the cafeteria menu for Conferência de inventário next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-021", "language": "en", "question": "What is the cafeteria menu for Mechanical drawing approval next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-022", "language": "pt", "question": "What is the cafeteria menu for Reserva de salas de montagem next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-023", "language": "en", "question": "What is the cafeteria menu for Data export packaging next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-024", "language": "pt", "question": "What is the cafeteria menu for Troca de etiquetas térmicas next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-025", "language": "en", "question": "What is the cafeteria menu for Robotic cell handover next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-026", "language": "pt", "question": "What is the cafeteria menu for Conservação de moldes next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-027", "language": "en", "question": "What is the cafeteria menu for Thermal camera loans next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-028", "language": "pt", "question": "What is the cafeteria menu for Revisão de diagramas elétricos next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-029", "language": "en", "question": "What is the cafeteria menu for Sample archive retrieval next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-030", "language": "pt", "question": "What is the cafeteria menu for Distribuição de kits de campo next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-031", "language": "en", "question": "What is the cafeteria menu for Firmware qualification next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-032", "language": "pt", "question": "What is the cafeteria menu for Triagem de peças retornadas next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-033", "language": "en", "question": "What is the cafeteria menu for Demonstration equipment packing next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-034", "language": "pt", "question": "What is the cafeteria menu for Preparação de bancadas didáticas next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-035", "language": "en", "question": "What is the cafeteria menu for Optical alignment checks next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-036", "language": "pt", "question": "What is the cafeteria menu for Validação de relatórios de ensaio next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-037", "language": "en", "question": "What is the cafeteria menu for Marine sensor storage next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-038", "language": "pt", "question": "What is the cafeteria menu for Controle de painéis de demonstração next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-039", "language": "en", "question": "What is the cafeteria menu for Portable recorder checkout next Tuesday?", "should_abstain": true}
+{"expected_answer_facts": [], "gold_chunk_ids": [], "id": "ua-040", "language": "pt", "question": "What is the cafeteria menu for Organização de arquivos vetoriais next Tuesday?", "should_abstain": true}
