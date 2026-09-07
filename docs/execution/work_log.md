@@ -505,3 +505,11 @@ duplicate-version collapse, and per-slice/language aggregation. The production
 harness validates the dataset before retrieval and deduplicates mapped version
 labels before scoring. Focused tests, Ruff, and mypy pass; no quality baseline or
 real-model result was changed.
+
+## 2026-09-07 — T-404 local implementation
+
+Moved entailment judging to the versioned `entailment_v1` rubric under
+`evals/harness/judges`, recorded its SHA-256 and Haiku model identity, and added
+strict parsing. Missing, duplicate, malformed, or out-of-range labels now produce
+an explicit incomplete result and cannot upgrade groundedness. Focused judge tests,
+Ruff, and mypy pass; no live judge call or paid spend occurred.

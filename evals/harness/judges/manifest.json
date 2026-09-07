@@ -1,0 +1,10 @@
+{
+  "rubrics": [
+    {
+      "id": "entailment_v1",
+      "file": "entailment_v1.md",
+      "sha256": "5b090686f49ac59fdcdd352fb38ff9670df0b851d9e74a918cf9a58c70c2548a",
+      "model": "claude-haiku-4-5"
+    }
+  ]
+}

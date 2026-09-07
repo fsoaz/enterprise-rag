@@ -627,4 +627,19 @@ Branch: `feat/T-403-retrieval-metrics`, based on `95b52b3`. No paid model calls
 - Focused metrics/dataset/manifest tests: 13 tests pass (the
   combined Phase 4 foundation checks remain deterministic).
 - Ruff check/format and mypy pass. Full suite is to be rerun after commit; no
-  baseline, model identity, or production retrieval default changed.
+baseline, model identity, or production retrieval default changed.
+
+## 2026-09-07 — T-404 answer judges (local)
+
+Branch: `feat/T-404-answer-judges`, based on `2524eaa`. No paid model calls
+(US$0 of the US$25 allowance), no CI result, and no answer-quality score claimed.
+
+- Added versioned `evals/harness/judges/entailment_v1.md` and
+  `evals/harness/judges/manifest.json` with model `claude-haiku-4-5` and rubric
+  SHA-256 `5b090686f49ac59fdcdd352fb38ff9670df0b851d9e74a918cf9a58c70c2548a`.
+- `parse_judgement` requires exactly one valid label for every pair. Incomplete
+  results expose `complete=false` and an error; chat forces all labels to
+  `unrelated`, guaranteeing the verdict cannot pass as grounded.
+- Judge, fallback, groundedness tests: 10 passed. Ruff check/format and mypy
+  pass. Full suite and CI remain separate evidence; no database or migration
+  changed.

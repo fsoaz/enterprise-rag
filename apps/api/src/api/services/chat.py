@@ -308,6 +308,10 @@ async def run_chat(
         pairs = [(generation.answer_text, c.cited_text) for c in generation.citations[:8]]
         judge = await client.judge_entailment(pairs)
         labels = judge.labels
+        if not judge.complete:
+            # A partial judge response is an incomplete evaluation, never evidence
+            # that can upgrade the answer to grounded.
+            labels = ["unrelated"] * len(labels)
 
     verdict = groundedness_verdict(
         coverage=coverage or 0.0,
