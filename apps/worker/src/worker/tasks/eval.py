@@ -288,6 +288,8 @@ def _answer_metrics(
         "false_abstention_rate": float(abstained != item.should_abstain),
         "authorization_violations": len(set(retrieved).intersection(excluded)),
         "authorization_pass": not set(retrieved).intersection(excluded),
+        "empty_retrieval": not retrieved,
+        "empty_retrieval_rate": float(not retrieved),
         "acl_bypass": float(len(set(retrieved).intersection(excluded))),
         # Retrieval is always executed with the run's tenant context.  Recording
         # the zero explicitly makes the zero-tolerance CI gate fail closed if a
@@ -309,6 +311,7 @@ async def _evaluate_item(
         session, tenant_id=tenant_id, item=item
     )
     retrieval_config = _retrieval_config(run)
+    retrieval_start = time.perf_counter()
     retrieval = await retrieve(
         session,
         tenant_id=tenant_id,
@@ -318,6 +321,7 @@ async def _evaluate_item(
         as_of=item.as_of,
         **retrieval_config,
     )
+    retrieval_latency_ms = int((time.perf_counter() - retrieval_start) * 1000)
     retrieved = deduplicate_retrieved([str(hit.chunk_id) for hit in retrieval.hits])
     source_hits = retrieval.hits if _live_llm() else retrieval.lexical_evidence_hits
     titles = await _titles(session, [hit.document_id for hit in source_hits])
@@ -445,6 +449,7 @@ async def _evaluate_item(
     )
     metrics.update(
         {
+            "retrieval_latency_ms": retrieval_latency_ms,
             "generator_model": generation.model,
             "judge_model": JUDGE_MODEL if _live_llm() and labels else None,
             "judge_prompt_hash": judge_hash,

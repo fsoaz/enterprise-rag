@@ -976,6 +976,33 @@ This rule governs the **degraded** path only, and the degraded path is now narro
 
 **Concretely:** `apps/api/src/api/pagination.py` holds `encode_cursor`, `decode_cursor`, `apply_descending_cursor` and `page_rows`. `page_rows` fetches `limit + 1` rows to decide whether a further page exists without a second count query; `next_cursor` is `null` on the last page. `limit` is clamped to `[1, 200]`. Each endpoint's ordering is backed by a matching composite index (§ 14.6).
 
+### ADR-015 — Fixed-token remains the production chunking default
+
+**Decision:** Keep `fixed_token` as the production default and retain
+`section_aware` as an explicit opt-in experiment. The worker and corpus loader
+continue to accept `CHUNKING_STRATEGY=section_aware` for controlled validation.
+
+**Evidence:** T-408 ran both variants against the same immutable 320-item,
+eight-slice dataset (`content_sha256=a6bbd5c2b34682d90600f4930c4a52ba826716002d52bfe6d6c36754b8b29a6f`)
+through the production ingestion, embedding, indexing, retrieval, API, Celery,
+and evaluation paths. The deterministic stub run used four strategies per
+variant. For the hybrid RRF control, section-aware changed recall@10 from
+0.190625 to 0.190625, nDCG@10 from 0.076244 to 0.076704, and MRR@10 from
+0.096421 to 0.097824. Empty retrieval remained 0.031250, tenant leakage remained
+0, and ACL bypass remained 0.012500 for both variants. The hybrid RRF latency was
+83.61 ms for fixed-token and 44.61 ms for section-aware in this execution order;
+latency is therefore treated as non-regressive but not as a durable performance
+claim. Per-slice recall was unchanged; the only hybrid-RRF ranking lift was in
+the multi-hop slice (nDCG +0.003679, MRR +0.011220).
+
+**Why:** The candidate's ranking gains are marginal, recall does not improve,
+and the stub backend is suitable for wiring and isolation evidence but not a
+semantic-quality claim. Retaining the established default limits rollout risk
+while preserving a reproducible path for a future real-BGE comparison. Neither
+variant introduced a tenant-isolation or ACL regression in the full run.
+The nonzero ACL-bypass value is shared by both variants in the injection slice and
+remains a separate strict-gate investigation before any production security claim.
+
 ## 16. Repository Layout
 
 ```text

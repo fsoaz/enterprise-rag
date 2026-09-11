@@ -1,4 +1,4 @@
-"""Fixed-token chunking (~512 tokens, 64 overlap) with section/language heuristics."""
+"""Deterministic chunking strategies with section and language heuristics."""
 
 from __future__ import annotations
 
@@ -10,12 +10,15 @@ from domain.text import detect_supported_language
 from domain.types import (
     DEFAULT_CHUNK_OVERLAP,
     DEFAULT_CHUNK_TOKENS,
+    DEFAULT_CHUNKING_STRATEGY,
     INJECTION_RISK_LINGUISTIC,
+    ChunkingStrategy,
 )
 from worker.pipeline.parse import ParsedDocument
 
 # Approx tokens ≈ words for Latin scripts; chars/4 as fallback for dense text.
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
+_PARAGRAPH_RE = re.compile(r"\S.*?(?=\n\s*\n|\Z)", re.DOTALL)
 _WORD_RE = re.compile(r"\S+")
 
 
@@ -160,13 +163,47 @@ def _page_for_offset(doc: ParsedDocument, offset: int) -> int | None:
     return doc.pages[-1].page_no
 
 
-def chunk_document(
+def _chunk_from_range(
+    doc: ParsedDocument,
+    *,
+    section_text: str,
+    section_start: int,
+    start: int,
+    end: int,
+    section_path: str,
+    ordinal: int,
+) -> TextChunk | None:
+    body = section_text[start:end].strip()
+    if not body:
+        return None
+    absolute_offset = section_start + start
+    page = _page_for_offset(doc, absolute_offset)
+    return TextChunk(
+        ordinal=ordinal,
+        body=body,
+        token_count=estimate_tokens(body),
+        page_from=page,
+        page_to=page,
+        section_path=section_path or None,
+        language=detect_language(body),
+        injection_risk=score_injection_risk(body),
+    )
+
+
+def _validate_options(target_tokens: int, overlap_tokens: int) -> None:
+    if target_tokens < 1:
+        raise ValueError("target_tokens must be positive")
+    if overlap_tokens < 0 or overlap_tokens >= target_tokens:
+        raise ValueError("overlap_tokens must be non-negative and smaller than target_tokens")
+
+
+def _chunk_fixed_token(
     doc: ParsedDocument,
     *,
     target_tokens: int = DEFAULT_CHUNK_TOKENS,
     overlap_tokens: int = DEFAULT_CHUNK_OVERLAP,
 ) -> list[TextChunk]:
-    """Split document into overlapping word windows of ~target_tokens."""
+    """Split each heading section into overlapping word windows."""
     text = doc.text.strip()
     if not text:
         return []
@@ -191,28 +228,128 @@ def chunk_document(
                 break
             start_char = window[0].start()
             end_char = window[-1].end()
-            body = section_text[start_char:end_char].strip()
-            if not body:
+            chunk = _chunk_from_range(
+                doc,
+                section_text=section_text,
+                section_start=sec_start,
+                start=start_char,
+                end=end_char,
+                section_path=section_path,
+                ordinal=ordinal,
+            )
+            if chunk is None:
                 i += step
                 continue
-            abs_offset = sec_start + start_char
-            page = _page_for_offset(doc, abs_offset)
-            lang = detect_language(body)
-            chunks.append(
-                TextChunk(
-                    ordinal=ordinal,
-                    body=body,
-                    token_count=estimate_tokens(body),
-                    page_from=page,
-                    page_to=page,
-                    section_path=section_path or None,
-                    language=lang,
-                    injection_risk=score_injection_risk(body),
-                )
-            )
+            chunks.append(chunk)
             ordinal += 1
             if i + target_tokens >= len(words):
                 break
             i += step
 
     return chunks
+
+
+def _chunk_section_aware(
+    doc: ParsedDocument,
+    *,
+    target_tokens: int = DEFAULT_CHUNK_TOKENS,
+    overlap_tokens: int = DEFAULT_CHUNK_OVERLAP,
+) -> list[TextChunk]:
+    """Pack Markdown blocks while keeping semantic sections intact.
+
+    Short headings and paragraphs share a chunk until the token budget is full.
+    An oversized paragraph falls back to deterministic overlapping windows. Chunks
+    never cross heading sections and only contain complete short paragraph blocks.
+    """
+    text = doc.text.strip()
+    if not text:
+        return []
+
+    chunks: list[TextChunk] = []
+    ordinal = 0
+    step = max(1, target_tokens - overlap_tokens)
+    for sec_start, sec_end, section_path in _section_spans(text):
+        section_text = text[sec_start:sec_end].strip()
+        if not section_text:
+            continue
+        blocks = list(_PARAGRAPH_RE.finditer(section_text))
+        pending_start: int | None = None
+        pending_end: int | None = None
+        pending_tokens = 0
+
+        def flush_pending(
+            current_section_text: str = section_text,
+            current_section_start: int = sec_start,
+            current_section_path: str = section_path,
+        ) -> None:
+            nonlocal ordinal, pending_start, pending_end, pending_tokens
+            if pending_start is None or pending_end is None:
+                return
+            chunk = _chunk_from_range(
+                doc,
+                section_text=current_section_text,
+                section_start=current_section_start,
+                start=pending_start,
+                end=pending_end,
+                section_path=current_section_path,
+                ordinal=ordinal,
+            )
+            if chunk is not None:
+                chunks.append(chunk)
+                ordinal += 1
+            pending_start = None
+            pending_end = None
+            pending_tokens = 0
+
+        for block in blocks:
+            block_start, block_end = block.span()
+            block_text = block.group(0).strip()
+            block_words = list(_WORD_RE.finditer(block_text))
+            block_tokens = len(block_words)
+            if block_tokens > target_tokens:
+                flush_pending()
+                for index in range(0, block_tokens, step):
+                    window = block_words[index : index + target_tokens]
+                    chunk = _chunk_from_range(
+                        doc,
+                        section_text=section_text,
+                        section_start=sec_start,
+                        start=block_start + window[0].start(),
+                        end=block_start + window[-1].end(),
+                        section_path=section_path,
+                        ordinal=ordinal,
+                    )
+                    if chunk is not None:
+                        chunks.append(chunk)
+                        ordinal += 1
+                    if index + target_tokens >= block_tokens:
+                        break
+                continue
+
+            if pending_start is not None and pending_tokens + block_tokens > target_tokens:
+                flush_pending()
+            if pending_start is None:
+                pending_start = block_start
+            pending_end = block_end
+            pending_tokens += block_tokens
+        flush_pending()
+
+    return chunks
+
+
+def chunk_document(
+    doc: ParsedDocument,
+    *,
+    target_tokens: int = DEFAULT_CHUNK_TOKENS,
+    overlap_tokens: int = DEFAULT_CHUNK_OVERLAP,
+    strategy: str = DEFAULT_CHUNKING_STRATEGY,
+) -> list[TextChunk]:
+    """Chunk a document using an explicitly named deterministic strategy."""
+    _validate_options(target_tokens, overlap_tokens)
+    try:
+        selected = ChunkingStrategy(strategy)
+    except ValueError as exc:
+        raise ValueError(f"unsupported chunking strategy: {strategy}") from exc
+    if selected == ChunkingStrategy.FIXED_TOKEN:
+        return _chunk_fixed_token(doc, target_tokens=target_tokens, overlap_tokens=overlap_tokens)
+    return _chunk_section_aware(doc, target_tokens=target_tokens, overlap_tokens=overlap_tokens)

@@ -28,6 +28,7 @@ from db.models import (
     Tenant,
 )
 from domain.types import (
+    DEFAULT_CHUNKING_STRATEGY,
     AclEffect,
     AclPermission,
     AclResourceType,
@@ -119,10 +120,11 @@ async def _ensure_version_chunks(
     tenant_id: UUID,
     version: DocumentVersion,
     fixture: Path,
+    chunking_strategy: str = DEFAULT_CHUNKING_STRATEGY,
 ) -> None:
     raw = fixture.read_bytes()
     parsed = parse_bytes(raw, mime_type="text/markdown", filename=fixture.name)
-    text_chunks = chunk_document(parsed)
+    text_chunks = chunk_document(parsed, strategy=chunking_strategy)
     if not text_chunks:
         raise CorpusError(f"fixture {fixture.name} produced no chunks")
 
@@ -201,6 +203,7 @@ async def load_corpus(
     *,
     manifest_path: Path = DEFAULT_MANIFEST,
     tenant_id: UUID,
+    chunking_strategy: str = DEFAULT_CHUNKING_STRATEGY,
 ) -> dict[str, UUID]:
     """Materialise the manifest and return ``label -> document_version_id``."""
     manifest = read_manifest(manifest_path, fixture_dir=FIXTURE_DIR)
@@ -271,7 +274,11 @@ async def load_corpus(
             await session.flush()
 
             await _ensure_version_chunks(
-                session, tenant_id=tenant_id, version=version, fixture=fixture
+                session,
+                tenant_id=tenant_id,
+                version=version,
+                fixture=fixture,
+                chunking_strategy=chunking_strategy,
             )
             labels[label] = UUID(str(version.id))
 

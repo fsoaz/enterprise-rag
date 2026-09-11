@@ -44,6 +44,13 @@ def test_configuration_is_strict_and_duplicate_combinations_are_rejected() -> No
         )
 
 
+def test_configuration__chunking_strategy__is_validated_and_preserved() -> None:
+    config = validate_config({"dataset_id": str(uuid4()), "chunking_strategy": "section_aware"})
+    assert config.chunking_strategy == "section_aware"
+    with pytest.raises(ComparisonConfigError, match="unsupported chunking_strategy"):
+        validate_config({"dataset_id": str(uuid4()), "chunking_strategy": "random"})
+
+
 def test_report_aligns_items_and_is_deterministically_significant() -> None:
     baseline = str(uuid4())
     candidate = str(uuid4())
@@ -142,3 +149,40 @@ def test_runner_uses_sequential_run_worker_flow(monkeypatch: pytest.MonkeyPatch)
     assert [method for method, _ in calls].index("POST") < [method for method, _ in calls].index(
         "GET"
     )
+
+
+def test_runner_retries_transient_run_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset_id = str(uuid4())
+    config = validate_config(
+        {
+            "dataset_id": dataset_id,
+            "poll_interval_seconds": 0.001,
+            "bootstrap_resamples": 100,
+        }
+    )
+    missing_once = {"value": True}
+
+    def fake_request(url: str, *, method: str = "GET", body: object = None, user: str) -> object:
+        del body, user
+        if method == "POST":
+            return {"id": str(uuid4())}
+        if "/results" in url:
+            return {"data": [{"item_id": "item-1", "metrics": {"recall@10": 1.0}}]}
+        if "/items" in url:
+            return {"data": [{"id": "item-1", "slice": "default"}]}
+        if missing_once["value"]:
+            missing_once["value"] = False
+            raise ComparisonError(
+                "comparison API request failed: GET /evals/runs/id: HTTP Error 404"
+            )
+        return {
+            "id": url.rsplit("/", 1)[-1],
+            "dataset_id": dataset_id,
+            "strategy": "hybrid_rrf",
+            "status": "complete",
+            "params": {"status": "complete"},
+        }
+
+    monkeypatch.setattr("evals.harness.compare._http_json", fake_request)
+    report = run_comparison(config)
+    assert report["dataset"]["item_count"] == 1

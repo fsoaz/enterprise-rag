@@ -78,6 +78,11 @@ class RetrievalStrategy(StrEnum):
     HYBRID_RERANK = "hybrid_rerank"
 
 
+class ChunkingStrategy(StrEnum):
+    FIXED_TOKEN = "fixed_token"
+    SECTION_AWARE = "section_aware"
+
+
 EMBEDDING_DIM = 1024
 DEFAULT_RRF_K = 60
 
@@ -91,5 +96,6 @@ INJECTION_RISK_FLAG = 0.5
 INJECTION_RISK_LINGUISTIC = 0.75
 DEFAULT_CHUNK_TOKENS = 512
 DEFAULT_CHUNK_OVERLAP = 64
+DEFAULT_CHUNKING_STRATEGY = ChunkingStrategy.FIXED_TOKEN.value
 DEFAULT_TOP_K_RETRIEVAL = 50
 DEFAULT_TOP_K_RERANK = 8

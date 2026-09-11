@@ -4,6 +4,69 @@
 > One entry per completed task. Never edit or delete a past entry; correct it with a new one that says what changed.
 > **Related:** [current_task.md](./current_task.md) · [test_evidence.md](./test_evidence.md) · [review_notes.md](./review_notes.md)
 
+## 2026-09-10 — T-408 chunking experiment (completed)
+
+**Status:** done
+**PR:** —
+**Branch:** working tree
+
+### What changed
+
+Completed the full 320-item comparison of fixed-token and section-aware chunking
+through the production ingestion and evaluation path. The variants matched on
+recall and security outcomes; section-aware showed only marginal ranking gains, so
+ADR-015 retains fixed-token as the production default while preserving the opt-in
+variant.
+
+### Decisions
+
+The full run used the deterministic stub inference profile and is wiring evidence,
+not a real-model quality claim. The runner now keeps corpus loads in one async
+event loop, avoiding SQLAlchemy connection reuse across `asyncio.run()` calls.
+
+### Verification
+
+[E-014](./test_evidence.md) records the disposable-service run, complete coverage,
+and measured decision. Focused tests and static checks are rerun after this entry.
+
+### Follow-ups
+
+Hosted T-407 smoke evidence remains required for R-031. A future real-BGE
+comparison can validate whether section-aware chunking merits promotion.
+
+## 2026-09-10 — T-408 chunking experiment (implementation)
+
+**Status:** in_review
+**PR:** —
+**Branch:** working tree
+
+### What changed
+
+Added explicit `fixed_token` and `section_aware` chunking strategies. The existing
+fixed-token behavior remains the default; the section-aware variant packs complete
+Markdown blocks within heading sections and only windows oversized paragraphs.
+The corpus loader and worker now accept an explicit strategy, and the T-408 runner
+executes each variant through the existing T-406 API/Celery evaluation path.
+
+Per-result evaluation metrics now include retrieval latency and empty-retrieval rate.
+The experiment emits separate comparison reports with shared dataset identity,
+configuration, coverage, and paired-bootstrap statistics. No production default,
+database schema, or API contract was changed.
+
+### Verification
+
+The chunking unit suite passes (**15 passed**) and T-406 comparison/gate tests pass
+(**11 passed**). Syntax compilation and `git diff --check` pass. Full project tests,
+disposable-service measurements, and the Q-1 ADR remain pending because the checked-in
+`.venv` points to a missing Python interpreter and no replacement `uv` environment is
+available in the workspace.
+
+### Follow-ups
+
+Run `python -m evals.harness.chunking --mode full` against disposable services, record
+the metric comparison and decision ADR, then advance to T-409. Hosted T-407 smoke
+evidence remains separately required for R-031.
+
 ## 2026-09-07 — T-407 CI evaluation gates (implementation)
 
 **Status:** in_review

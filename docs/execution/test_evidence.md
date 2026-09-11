@@ -5,6 +5,46 @@
 
 Claiming a task is done requires an entry here. "Tests pass" without a command and an output is not evidence.
 
+### E-013 — 2026-09-10 — T-408 chunking experiment (implementation review)
+
+| Command | Result |
+| --- | --- |
+| `python3 -m pytest -q apps/worker/tests/test_chunk.py` | **15 passed** |
+| `python3 -m pytest -q evals/harness/test_compare.py evals/harness/test_gate.py` | **11 passed** |
+| `python3 -m compileall -q apps/worker/src packages/domain/src evals/harness` | pass |
+| `git diff --check` | pass |
+| `uv run pytest ...` | unavailable: `uv` is not on PATH |
+| `.venv/bin/pytest ...` | unavailable: broken interpreter target |
+
+The implementation adds deterministic `fixed_token` and `section_aware` variants,
+explicit corpus-loader selection, and the `evals.harness.chunking` production-path
+runner. Disposable Postgres/Redis/inference measurements and the final Q-1 ADR have
+not yet been run; no retrieval-quality conclusion is claimed.
+
+### E-014 — 2026-09-10 — T-408 full chunking comparison
+
+**Environment:** disposable Postgres and Redis containers, current-source API and
+Celery worker, and stub inference. The final run used the documented Anthropic
+replacement-key sentinel, so no paid or external generation calls were made.
+
+| Command | Result |
+| --- | --- |
+| `python -m evals.harness.chunking --mode smoke --output /tmp/t408-smoke.json` | **completed** after bounded transient-404 retry: 2 variants × 4 strategies × 48 items; all 8 runs complete with 48/48 results |
+| `python -m evals.harness.chunking --mode full --output /tmp/t408-full.json` | **completed**: 2 variants × 4 strategies × 320 items; all 8 runs complete with 320/320 results |
+| Full report envelope validation | **pass**: shared dataset hash, both variants, all eight slices, complete coverage |
+| `fixed_token` vs `section_aware` hybrid RRF | recall **0.190625 → 0.190625**; nDCG **0.076244 → 0.076704**; MRR **0.096421 → 0.097824** |
+| Security/availability comparison | empty retrieval **0.031250** both; tenant leakage **0** both; ACL bypass **0.012500** both |
+| Focused tests after race fix | **39 passed** |
+| Ruff, formatting, mypy, import boundaries, compilation | **pass** |
+| `pytest -q -m 'not integration'` | **timed out at 90s** at pre-existing `apps/api/tests/test_auth.py::test_me_requires_auth`; changed focused tests pass |
+| `git diff --check` | pass |
+
+The candidate's gains were marginal and recall was unchanged, so [ADR-015](../context/architecture.md#adr-015--fixed-token-remains-the-production-chunking-default)
+retains `fixed_token` as the production default. The report was generated in
+`/tmp` because its run IDs are disposable; the measured decision is recorded here
+and in the ADR. An initial attempt exposed and was corrected for async-engine reuse
+across event loops in the runner before this final clean run.
+
 ### E-012 — 2026-09-07 — T-407 CI evaluation gates (implementation review)
 
 **Environment:** local disposable Postgres/Redis containers with current-source API,

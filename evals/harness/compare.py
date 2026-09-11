@@ -22,6 +22,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from uuid import UUID
 
+from domain.types import ChunkingStrategy
+
 DEFAULT_STRATEGIES = ("hybrid_rrf", "dense_only", "lexical_only", "hybrid_rerank")
 VALID_STRATEGIES = frozenset(DEFAULT_STRATEGIES)
 DEFAULT_BOOTSTRAP_RESAMPLES = 10_000
@@ -54,6 +56,7 @@ class ComparisonConfig:
     timeout_seconds: float = 3600.0
     bootstrap_resamples: int = DEFAULT_BOOTSTRAP_RESAMPLES
     bootstrap_seed: int = DEFAULT_BOOTSTRAP_SEED
+    chunking_strategy: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +124,7 @@ def validate_config(raw: Mapping[str, Any]) -> ComparisonConfig:
         "timeout_seconds",
         "bootstrap_resamples",
         "bootstrap_seed",
+        "chunking_strategy",
     }
     unknown = sorted(set(raw) - allowed)
     if unknown:
@@ -208,6 +212,11 @@ def validate_config(raw: Mapping[str, Any]) -> ComparisonConfig:
         raise ComparisonConfigError("bootstrap_seed must be an integer")
     if resamples < 100:
         raise ComparisonConfigError("bootstrap_resamples must be at least 100")
+    chunking_strategy = raw.get("chunking_strategy")
+    if chunking_strategy is not None:
+        chunking_strategy = _nonempty_string(chunking_strategy, field="chunking_strategy")
+        if chunking_strategy not in {strategy.value for strategy in ChunkingStrategy}:
+            raise ComparisonConfigError(f"unsupported chunking_strategy: {chunking_strategy}")
     return ComparisonConfig(
         dataset_id=dataset_id,
         strategies=strategies,
@@ -222,6 +231,7 @@ def validate_config(raw: Mapping[str, Any]) -> ComparisonConfig:
         timeout_seconds=timeout,
         bootstrap_resamples=resamples,
         bootstrap_seed=seed,
+        chunking_strategy=chunking_strategy,
     )
 
 
@@ -235,7 +245,7 @@ def load_config(path: str | Path) -> ComparisonConfig:
 
 
 def config_dict(config: ComparisonConfig) -> dict[str, Any]:
-    return {
+    result = {
         "dataset_id": str(config.dataset_id),
         "strategies": list(config.strategies),
         "embedding_models": [dict(model) for model in config.embedding_models],
@@ -250,6 +260,9 @@ def config_dict(config: ComparisonConfig) -> dict[str, Any]:
         "bootstrap_resamples": config.bootstrap_resamples,
         "bootstrap_seed": config.bootstrap_seed,
     }
+    if config.chunking_strategy is not None:
+        result["chunking_strategy"] = config.chunking_strategy
+    return result
 
 
 def expand_sweep(config: ComparisonConfig) -> list[RunSpec]:
@@ -574,6 +587,8 @@ def run_comparison(config: ComparisonConfig) -> dict[str, Any]:
             "reranker_endpoint": reranker.get("endpoint") if reranker else None,
             "retrieval": dict(spec.retrieval_params),
         }
+        if config.chunking_strategy is not None:
+            params["chunking_strategy"] = config.chunking_strategy
         payload = {
             "dataset_id": str(config.dataset_id),
             "strategy": spec.strategy,
@@ -587,8 +602,19 @@ def run_comparison(config: ComparisonConfig) -> dict[str, Any]:
         )
         run_id = str(row["id"])
         run_ids.append(run_id)
+        lookup_deadline = time.monotonic() + min(30.0, config.timeout_seconds)
         while True:
-            current = _http_json(f"{config.api_url}/evals/runs/{run_id}", user=config.user)
+            try:
+                current = _http_json(f"{config.api_url}/evals/runs/{run_id}", user=config.user)
+            except ComparisonError as exc:
+                # The API commits the run and publishes the Celery task in adjacent
+                # transactions. A worker or read replica can briefly race the
+                # status lookup; tolerate that narrow eventual-consistency window,
+                # but do not turn a permanently missing run into an hour-long poll.
+                if "HTTP Error 404" not in str(exc) or time.monotonic() >= lookup_deadline:
+                    raise
+                time.sleep(config.poll_interval_seconds)
+                continue
             status = str(current.get("status", "queued"))
             if status in TERMINAL_STATUSES:
                 run_rows.append(current)
