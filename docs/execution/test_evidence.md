@@ -5,6 +5,44 @@
 
 Claiming a task is done requires an entry here. "Tests pass" without a command and an output is not evidence.
 
+### E-015 — 2026-09-11 — T-410 evaluation runtime package (Podman)
+
+**Environment:**
+- **Tooling:** `uv` is not installed on the host, and `.venv` targets a removed interpreter. Every check therefore ran under Podman 5.8.4 in `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` (uv 0.9.30).
+- **Services:** disposable `pgvector/pgvector:pg16` and `redis:7-alpine` containers on a private network; stub inference, the current-source API, and a Celery worker.
+- **Model calls:** the Anthropic key was the replacement sentinel, so no paid calls were made.
+
+| Command | Result |
+| --- | --- |
+| `uv lock`, then `uv sync --all-packages --group dev --frozen` | pass; lock diff trimmed to 26 additive lines for `enterprise-rag-evaluation` |
+| `ruff check .` / `ruff format --check .` | **pass** / **424 files already formatted** |
+| `mypy` | **no issues in 75 source files** |
+| `lint-imports` | **7 contracts kept**, including `evaluation-scope` and `product-never-imports-evals` |
+| Negative control: append `import evals.harness.metrics` to `api/routers/evals.py`, run `lint-imports`, restore | **1 broken**: `product-never-imports-evals` on `api.routers.evals -> evals.harness.metrics`; exit 1; file restored |
+| `pytest -q -m "not integration"` | **159 passed, 1 skipped, 23 deselected** |
+| `podman build -f infra/compose/Dockerfile.api .`, then `python -c "import api.main, worker.tasks.eval, llm.judge; llm.judge.rubric_text()"` | **imports ok**; rubric SHA-256 `5b090686…c2548a` matches the manifest |
+| Same build and check on `git archive f348059` (pre-change control) | **fails**: `ModuleNotFoundError: No module named 'evals'` at `api/routers/evals.py:17` |
+| `alembic upgrade head` from an empty database | **pass** through `0006_eval_source_labels`; `eval_source_labels` RLS, FORCE, `tenant_isolation`, `rag_app` INSERT = `t\|t\|1\|t` |
+| `alembic downgrade -1` | **pass**; version `0005_eval_execution`; table absent |
+| `alembic upgrade head` + `python -m db.seed` | **pass**; catalog check `t\|t\|1\|t` again |
+| `pytest -q -m integration` (stub inference) | **20 passed, 3 skipped, 160 deselected** |
+| OpenAPI regeneration compared with `openapi.json` and `apps/web/openapi.json` | **both in sync** |
+| Fresh database, then `python -m evals.harness.ci --mode smoke` through API + Celery | **pass**; 4 strategies × 48 items, all runs `complete`; dataset `content_sha256` `32b0b7b1…a9a5` equals the baseline |
+| `python -m evals.harness.gate --baseline evals/baselines/t407-smoke.json` | **passed, 0 violations**; baseline file unmodified |
+
+**Smoke `hybrid_rrf` results** are identical to the committed baseline:
+- recall@10 **0.1042**, nDCG@10 **0.0526**
+- faithfulness **0.0417**, citation precision **0.3333**
+- unsupported-answer rate **1.0000**, correct-abstention rate **0.3333**
+
+Tenant leakage and ACL bypass are **0** for all four runs. The new
+`packages/evaluation/tests/test_labels.py` has no skip path, so it is among the passes.
+
+**Not executed:**
+- `make up` with the built images (no compose provider is installed for Podman)
+- the generated TypeScript client check
+- the hosted GitHub Actions run
+
 ### E-013 — 2026-09-10 — T-408 chunking experiment (implementation review)
 
 | Command | Result |

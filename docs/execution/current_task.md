@@ -9,12 +9,15 @@
 
 | Field | Value |
 | --- | --- |
-| Task | T-408 — Chunking experiment |
-| File | [T-408-chunking-experiment.md](../tasks/T-408-chunking-experiment.md) |
-| Status | done; decision recorded in ADR-015 |
-| Branch | working tree |
-| Started | 2026-09-10 |
-| Base | T-406 |
+| Task | T-410 — Extract the evaluation runtime from `evals/` tooling |
+| File | [T-410-evaluation-runtime-package.md](../tasks/T-410-evaluation-runtime-package.md) |
+| Status | in_progress — implementation and local verification complete ([E-015](./test_evidence.md)); awaiting commit, PR, and hosted CI |
+| Branch | feat/T-410-evaluation-runtime-package |
+| Started | 2026-09-11 |
+| Base | T-408 |
+
+T-410 resolves R-124 before the T-405→T-408 stack merges into `main`, which is the
+baseline and does not contain the coupling.
 
 Milestone A remains incomplete. The July 31 QA report records 21 defects fixed,
 two intentional behaviors, and one fixed regression. Those fixes are committed;

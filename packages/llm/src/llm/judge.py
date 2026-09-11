@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from importlib.resources import files
 
 _LINE = re.compile(
     r"^\s*(?P<index>\d+)\s*[.):\-]?\s*"
@@ -14,17 +14,13 @@ _LINE = re.compile(
 )
 _LABELS = frozenset({"entailed", "partial", "contradicted", "unrelated"})
 
-
-def rubric_path() -> Path:
-    for parent in Path(__file__).resolve().parents:
-        candidate = parent / "evals" / "harness" / "judges" / "entailment_v1.md"
-        if candidate.is_file():
-            return candidate
-    raise RuntimeError("versioned entailment rubric is missing")
+# Package data, so the API and worker images carry it. It used to be found by walking
+# up to the repository's evals/ directory, which no image contains (R-124).
+_RUBRIC = "entailment_v1.md"
 
 
 def rubric_text() -> str:
-    return rubric_path().read_text(encoding="utf-8")
+    return files("llm.judges").joinpath(_RUBRIC).read_text(encoding="utf-8")
 
 
 def rubric_hash() -> str:

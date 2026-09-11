@@ -696,3 +696,26 @@ upload walkthrough were not executed in this documentation pass. The Docker CLI
 is unavailable here. Hosted branch protection, external scanning, and any cloud
 infrastructure outside this repository remain unverified. Earlier historical
 execution entries above retain their original scope and evidence.
+
+## 2026-09-11 — T-410 evaluation runtime package (local verification)
+
+Resolved R-124 on `feat/T-410-evaluation-runtime-package`, stacked on T-408, before
+the T-405→T-408 stack merges into `main`.
+
+What changed:
+- **Runtime evaluation code** moved into `packages/evaluation`: ranking metrics, the comparison report, and source-label resolution.
+- **The judge rubric** is now `llm` package data, byte-identical, so its SHA-256 is unchanged.
+- **Source labels** resolve from the new tenant-scoped `eval_source_labels` table, which the offline corpus loader writes (migration `0006_eval_source_labels`).
+- **`evals/`** keeps the sweep runner, CI flow, gate, loaders, fixtures, and datasets.
+- **Boundary enforcement:** no product module imports `evals`. The import-linter contracts `product-never-imports-evals` and `evaluation-scope` enforce that, and `container-build` now imports the application inside the built API image.
+- **Decision record:** ADR-016.
+
+How it was verified:
+- **No host tooling:** `uv` is not installed on the host, and `.venv` points at a removed interpreter. All checks therefore ran under Podman in `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` containers (uv 0.9.30), with disposable Postgres and Redis containers.
+- **Lockfile:** `uv.lock` was regenerated, then trimmed to the 26 additive lines for the new package. Unrelated torch marker churn from the newer uv was reverted. The image's pinned uv 0.6.14 accepted the lock under `--frozen`.
+- **Results:** see E-015.
+
+[VERIFY] Not executed:
+- Compose startup of the built images, because no compose provider is installed for Podman.
+- The hosted GitHub Actions run.
+- The generated TypeScript client check, although the OpenAPI documents are unchanged.

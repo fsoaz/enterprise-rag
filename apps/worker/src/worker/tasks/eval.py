@@ -10,18 +10,19 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from evals.harness.metrics import (
+from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from db.models import Chunk, CostLedger, Document, EvalDataset, EvalItem, EvalResult, EvalRun, User
+from db.session import set_tenant_context
+from evaluation.labels import resolve_labels
+from evaluation.metrics import (
     deduplicate_retrieved,
     mrr_at_k,
     ndcg_at_k,
     precision_at_k,
     recall_at_k,
 )
-from sqlalchemy import func, select, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-from db.models import Chunk, CostLedger, Document, EvalDataset, EvalItem, EvalResult, EvalRun, User
-from db.session import set_tenant_context
 from llm.client import AnthropicClient, CitationSpan, RetrievedChunk, extractive_fallback
 from llm.groundedness import citation_coverage, groundedness_verdict, retrieval_confidence
 from llm.judge import rubric_hash
@@ -142,12 +143,10 @@ async def _source_ids(
     session: AsyncSession, *, tenant_id: UUID, item: EvalItem
 ) -> tuple[list[UUID], list[UUID]]:
     """Resolve documented version labels to all chunks in those versions."""
-    from evals.harness.corpus import resolve_existing_labels
-
     labels = [*(item.gold_chunk_labels or []), *(item.must_exclude_chunk_labels or [])]
     version_ids: dict[str, UUID] = {}
     if labels:
-        resolved = await resolve_existing_labels(session, tenant_id=tenant_id)
+        resolved = await resolve_labels(session, tenant_id=tenant_id, labels=labels)
         missing = set(labels) - resolved.keys()
         if missing:
             raise LookupError(f"unknown evaluation source labels: {sorted(missing)}")

@@ -634,7 +634,7 @@ Each item: `question`, `expected_answer_facts[]`, `gold_chunk_ids[]`, `as_of`, `
 
 #### The corpus behind the gold labels
 
-`gold_chunk_ids` are **symbolic labels** (`chunk-security-en`), not database identifiers — the dataset is committed and the database is not. `evals/corpus.json` maps each label to a fixture file, a collection, and a version position; `evals/harness/corpus.py` materialises that manifest by running the fixtures through the **real worker pipeline** (parse → chunk → embed → FTS index) and returns `label → document_version_id`. Scoring compares the `document_version_id` of each retrieved hit against that mapping.
+`gold_chunk_ids` are **symbolic labels** (`chunk-security-en`), not database identifiers — the dataset is committed and the database is not. `evals/corpus.json` maps each label to a fixture file, a collection, and a version position; `evals/harness/corpus.py` materialises that manifest by running the fixtures through the **real worker pipeline** (parse → chunk → embed → FTS index) and returns `label → document_version_id`. Scoring compares the `document_version_id` of each retrieved hit against that mapping. The loader also records each binding in `eval_source_labels`. The evaluation API and worker resolve labels from that table through `evaluation.labels`; they never read the manifest or fixtures, which no deployable image contains ([ADR-016](#adr-016--the-evaluation-runtime-is-a-package-evals-is-offline-tooling)).
 
 Mapping by *version*, not document, is what lets the `versioned` slice work: `chunk-hr-v1` and `chunk-hr-v2` are two versions of one document, distinguishable only by version ID.
 
@@ -812,6 +812,7 @@ Twenty-one tables. Every tenant-scoped table has `tenant_id uuid NOT NULL`, RLS 
 | `eval_items` | `id`, `dataset_id`, `question`, `expected_facts jsonb`, `gold_chunk_ids uuid[]`, `as_of`, `acting_user_id`, `should_abstain` |
 | `eval_runs` | `id`, `dataset_id`, `strategy`, `embedding_model`, `reranker`, `generator_model`, `params jsonb`, `judge_prompt_hash`, `started_at`, `finished_at`, `git_sha` |
 | `eval_results` | `id`, `run_id`, `item_id`, `retrieved_chunk_ids uuid[]`, `metrics jsonb`, `answer_text`, `verdict`, `cost_usd` |
+| `eval_source_labels` | `tenant_id`, `label`, `document_version_id`: the offline corpus binding from a dataset's symbolic source label to a version. Primary key `(tenant_id, label)`; RLS like every tenant table ([ADR-016](#adr-016--the-evaluation-runtime-is-a-package-evals-is-offline-tooling)) |
 
 ### 14.6 Key indexes
 
@@ -1003,6 +1004,44 @@ variant introduced a tenant-isolation or ACL regression in the full run.
 The nonzero ACL-bypass value is shared by both variants in the injection slice and
 remains a separate strict-gate investigation before any production security claim.
 
+### ADR-016 — The evaluation runtime is a package; `evals/` is offline tooling
+
+**Decision:** Code that the API and worker execute for evaluation lives in packages:
+- `packages/evaluation`: ranking metrics, the comparison report, source-label resolution.
+- `packages/llm`: the judge rubric, shipped as package data.
+
+`evals/` holds the synthetic corpus, golden datasets, loaders, sweep runner, CI
+orchestration, and regression gate. It may import any package; no product module imports it.
+
+Datasets keep naming sources by symbolic label. The offline corpus loader binds each
+label to a document version in `eval_source_labels`, and runtime code reads that table
+instead of the manifest and fixture files.
+
+**Why:** When evaluation became an API and Celery feature (T-405–T-407), the report
+builder, metrics, label resolution, and rubric stayed in `evals/harness`:
+- The API router imported it at module load.
+- The worker imported it at task registration.
+- `llm.judge` located its rubric by walking up to the repository root.
+
+`Dockerfile.api` has never copied `evals/`, and CI starts services from the checkout and
+only builds images. Every gate stayed green while the image could not import its own
+application ([R-124](../execution/review_notes.md)). Label resolution also re-read and
+re-hashed every fixture file once per evaluated item.
+
+**Rejected:**
+
+- *Packaging `corpus.json` and the fixtures as assets.* Synthetic test data would become a production dependency.
+- *Clients sending document-version UUIDs instead of labels.* UUIDs differ per database, so the dataset `content_sha256` would stop being reproducible and the committed CI baseline would no longer match.
+
+**Enforced by:** import-linter contracts `product-never-imports-evals` and
+`evaluation-scope`, plus a `container-build` step that imports the application inside
+the built API image.
+
+**Cost accepted:**
+- One more workspace package.
+- An additive migration, `0006_eval_source_labels`, written idempotently because `0001_initial` derives its tables from current models (R-058).
+- Bindings exist only after the corpus loader has run against a database.
+
 ## 16. Repository Layout
 
 ```text
@@ -1043,15 +1082,18 @@ enterprise-rag/
 │   ├── domain/                 # entities, value objects, no I/O
 │   ├── db/                     # SQLAlchemy models, Alembic migrations
 │   ├── retrieval/              # strategies, fusion, ACL predicate builder
-│   ├── llm/                    # Anthropic client wrapper, prompts, cost
+│   ├── llm/                    # Anthropic client wrapper, prompts, cost, judges/ rubric data
+│   ├── evaluation/             # eval runtime: metrics, comparison report, source labels (ADR-016)
 │   └── observability/          # logging, tracing, metrics
-├── evals/
+├── evals/                      # offline tooling only; never imported by product code (ADR-016)
 │   ├── corpus.json             # gold label → fixture / collection / version manifest
+│   ├── baselines/              # committed CI gate baselines
 │   ├── datasets/               # golden set, versioned
 │   ├── fixtures/               # synthetic bilingual corpus
 │   └── harness/
-│       ├── corpus.py           # ingests fixtures via the real worker pipeline
-│       ├── metrics.py          # recall / nDCG / MRR, dataset loader
+│       ├── corpus.py           # ingests fixtures via the worker pipeline; binds labels
+│       ├── compare.py · ci.py · gate.py  # sweep runner, CI flow, regression gate
+│       ├── metrics.py          # golden dataset loader
 │       └── run.py              # live retrieval runner (§ 11.1)
 ├── infra/
 │   ├── compose/                # docker-compose.yml + service Dockerfiles
@@ -1069,6 +1111,7 @@ enterprise-rag/
 - `packages/domain` imports nothing from the project.
 - `apps/*` may import `packages/*`; `packages/*` may never import `apps/*`.
 - `apps/api` may not import `apps/worker` internals, and vice versa. Shared logic moves to `packages/`.
+- No module under `apps/*` or `packages/*` imports `evals/`. Evaluation code that the API or worker runs belongs in `packages/evaluation`, which may import only `domain` and `db` ([ADR-016](#adr-016--the-evaluation-runtime-is-a-package-evals-is-offline-tooling)).
 - `apps/web` talks to `apps/api` over HTTP only.
 
 ## 17. Deployment

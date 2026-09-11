@@ -29,16 +29,15 @@ from evals.harness.corpus import (
     DEFAULT_MANIFEST,
     CorpusError,
     load_corpus,
-    resolve_existing_labels,
     resolve_tenant_id,
 )
 from evals.harness.dataset import validate_dataset
-from evals.harness.metrics import (
-    EvalItem,
+from evals.harness.metrics import EvalItem, load_dataset
+from evaluation.labels import resolve_labels
+from evaluation.metrics import (
     aggregate_grouped_metrics,
     aggregate_retrieval_metrics,
     deduplicate_retrieved,
-    load_dataset,
 )
 from retrieval.pipeline import retrieve
 
@@ -95,9 +94,7 @@ async def run(args: argparse.Namespace) -> int:
             await session.begin()
             await set_tenant_context(session, tenant_id)
         else:
-            labels = await resolve_existing_labels(
-                session, manifest_path=args.manifest, tenant_id=tenant_id
-            )
+            labels = await resolve_labels(session, tenant_id=tenant_id)
 
         required = {label for item in items for label in item.gold_chunk_ids}
         missing = required - labels.keys()

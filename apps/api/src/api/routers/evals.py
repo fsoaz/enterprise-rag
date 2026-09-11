@@ -14,7 +14,6 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from celery import Celery
-from evals.harness.compare import ComparisonError, build_report
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, BeforeValidator, Field
 from sqlalchemy import func, select
@@ -27,6 +26,8 @@ from api.pagination import apply_descending_cursor, page_limit, page_rows
 from db.models import Chunk, EvalDataset, EvalItem, EvalResult, EvalRun, User
 from domain.errors import ConflictError, NotFoundError
 from domain.temporal import parse_as_of
+from evaluation.labels import resolve_labels
+from evaluation.report import ComparisonError, build_report
 
 router = APIRouter(prefix="/evals", tags=["evaluation"])
 
@@ -273,9 +274,9 @@ async def register_dataset(
         source_ids.update((*item_gold_ids, *item_excluded_ids))
         source_labels.update((*item_gold_labels, *item_excluded_labels))
     if source_labels:
-        from evals.harness.corpus import resolve_existing_labels
-
-        resolved_labels = await resolve_existing_labels(session, tenant_id=user.tenant_id)
+        resolved_labels = await resolve_labels(
+            session, tenant_id=user.tenant_id, labels=source_labels
+        )
         missing = source_labels - resolved_labels.keys()
         if missing:
             raise ConflictError(f"Unknown evaluation source labels: {sorted(missing)}")

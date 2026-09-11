@@ -296,6 +296,14 @@ jobs:
           cache-from: type=gha,scope=dockerfile-api
           cache-to: type=gha,mode=max,scope=dockerfile-api
 
+      # A build proves the image assembles, not that its code can import what it needs.
+      # The evaluation API once imported repository-only evals/ modules the image never
+      # contained, and every job stayed green (R-124).
+      - name: API/worker image imports its runtime modules
+        run: >-
+          docker run --rm enterprise-rag-api:latest python -c
+          "import api.main, worker.tasks.eval, llm.judge; llm.judge.rubric_text()"
+
       - name: Build inference image
         uses: docker/build-push-action@v6
         with:

@@ -244,7 +244,7 @@ Injection success rate is deliberately **not** in this table — it is a probabi
 - Answer-quality judging uses `claude-haiku-4-5` with a **versioned rubric prompt**.
 - The rubric prompt hash is stored on `eval_runs.judge_prompt_hash`.
 - Comparing two runs with different judge hashes is flagged in the dashboard — a judge change must never be read as a quality change.
-- Judge prompts live in `evals/harness/judges/` and change through the normal review process.
+- Judge prompts live in `packages/llm/src/llm/judges/` as package data, so the API and worker images carry them ([ADR-016](../context/architecture.md#adr-016--the-evaluation-runtime-is-a-package-evals-is-offline-tooling)). They change through the normal review process, and the recorded SHA-256 in `manifest.json` is asserted by `packages/llm/tests/test_judge.py`.
 
 ### 7.4 Baselines
 
