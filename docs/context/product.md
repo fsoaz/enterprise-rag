@@ -1,6 +1,6 @@
 # Product Context — Enterprise RAG Document Intelligence System
 
-> **Status:** Planning. No code written yet.
+> **Status (2026-09-11):** Milestone A in progress; Milestone B not started. This document defines product scope, not implementation status; see [current_task.md](../execution/current_task.md).
 > **Related:** [architecture.md](./architecture.md) · [roadmap.md](./roadmap.md)
 
 ---

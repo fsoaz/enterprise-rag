@@ -396,8 +396,8 @@ eval-smoke | scheduled eval-full | e2e | adversarial | pre-release load
 | integration | `integration-db` | Yes | Postgres + Redis services, `enterprise_rag_test`, plus a real `inference` process on `INFERENCE_BACKEND=stub` |
 | migrations | `integration-db` | Yes | `upgrade head` → `downgrade -1` → `upgrade head` → seed, from an empty database |
 | **security** (deterministic) | `unit` / `integration-db` | Yes | Never skipped. Fully mocked — no live model call, which is what makes it a legitimate gate. |
-| eval-smoke | `eval-smoke` | Yes | Pull requests; deterministic 48-item stub-inference run across all eight slices, compared with `evals/baselines/t407-smoke.json`. Hosted first-green evidence is pending for R-031. |
-| build | `container-build` | See note below | Builds API/worker, inference, and web images; checks Compose configuration. `next build` also runs in `typecheck`. No image publishing or deployment. |
+| eval-smoke | `eval-smoke` | Yes | Pull requests; deterministic 48-item stub-inference run across all eight slices, compared with `evals/baselines/t407-smoke.json`. Gates `recall@10`, `nDCG@10`, tenant leakage, and ACL bypass; answer metrics are report-only ([§ 7.2](#72-gates)). Hosted first-green evidence is pending for R-031. |
+| build | `container-build` | See note below | Builds API/worker, inference, and web images; checks Compose configuration; imports `api.main`, `worker.tasks.eval`, and the judge rubric inside the built API/worker image (R-124). `next build` also runs in `typecheck`. No image publishing or deployment. |
 | e2e | — | — | Not wired |
 | eval-full | `eval-full` | No (reports) | Scheduled full 320-item, eight-slice run with four configured strategies; retains the report and makes no paid model calls. |
 | **adversarial** (probabilistic) | — | **No** | Nightly and pre-release. Blocks **release**, not merge — see § 7.5. Not wired |

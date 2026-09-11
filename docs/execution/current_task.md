@@ -29,8 +29,9 @@ R-070, R-030, T-401, T-402, T-403, T-404, T-405, and T-406 are implemented local
 stacked task branches. T-407's workflow and deterministic gate are implemented;
 R-031 remains open until GitHub Actions runs the smoke job successfully. T-408's
 chunking experiment is complete and its fixed-token default decision is recorded
-in ADR-015. Remaining sequence: define and implement T-409, then release
-demonstration.
+in ADR-015. T-410 (`b6e68c1`) and T-411 (`78c5ead`) are committed separately on top
+of that stack, with local evidence in E-015 and E-016. Remaining sequence: define and
+implement T-409, then release demonstration.
 The T-408 full eight-slice evaluation is complete. Paid generation, judging, and expansion
 share a cumulative US$25 ceiling; no recurring nightly spend is authorized.
 Use disposable databases and keep deterministic and real-model evidence separate.
@@ -64,7 +65,7 @@ task file should be created and marked `in_progress` before code changes begin.
 | 1 | Ingestion & versioning (PDF/MD/TXT) | Done (sync ingest + pipeline) |
 | 2 | Retrieval core | Done |
 | 3 | Generation & citations | Done (live LLM optional; extractive fallback) |
-| 4 | Evaluation | Partial — T-401 through T-408 implemented; hosted CI evidence and later experiments outstanding |
+| 4 | Evaluation | Partial — T-401 through T-408, T-410, and T-411 implemented; hosted CI evidence (R-031), T-409, and later experiments outstanding |
 | 6a | Chat UI + minimal admin | Done — auth, multi-turn, PT/EN, admin document management, frontend tests |
 
 ---

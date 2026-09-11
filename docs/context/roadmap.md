@@ -1,6 +1,6 @@
 # Roadmap — Enterprise RAG Document Intelligence System
 
-> **Status:** Planning. Phase 0 not started.
+> **Status (2026-09-11):** Milestone A in progress: Phases 0–3 and 6a done, Phase 4 partial. Milestone B not started. Live status: [current_task.md](../execution/current_task.md).
 > **Related:** [product.md](./product.md) · [architecture.md](./architecture.md) · [../tasks/README.md](../tasks/README.md)
 
 ---
@@ -242,6 +242,16 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
 > `fixed_token` remains the production default and `section_aware` remains an
 > explicit opt-in for future real-BGE validation. T-409 is the remaining Phase 4
 > experiment for Q-2.
+
+> **Status note (2026-09-11).** T-410 moved the evaluation code the API and worker
+> run into `packages/evaluation`, made the judge rubric `llm` package data, and now
+> resolves source labels from `eval_source_labels`
+> ([ADR-016](./architecture.md#adr-016--the-evaluation-runtime-is-a-package-evals-is-offline-tooling), R-124).
+> T-411 commits queued runs before Celery publication, removes the legacy two-run
+> comparison route and unwired configuration, and makes answer metrics report-only
+> while retrieval and security gates stay enforced. Local evidence is E-015 and
+> E-016. Hosted CI (R-031) and live-model quality remain unmeasured, and T-409 is
+> still the remaining Phase 4 experiment.
 
 **Stories:** KW-5, PA-4
 

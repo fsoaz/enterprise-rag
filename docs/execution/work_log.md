@@ -4,6 +4,48 @@
 > One entry per completed task. Never edit or delete a past entry; correct it with a new one that says what changed.
 > **Related:** [current_task.md](./current_task.md) · [test_evidence.md](./test_evidence.md) · [review_notes.md](./review_notes.md)
 
+## 2026-09-11 — T-411 bounded complexity cleanup
+
+Committed the existing T-410 extraction separately as `b6e68c1`, then implemented
+[T-411](../tasks/T-411-bounded-complexity-cleanup.md) on its own branch.
+C11 commits queued runs before Celery publication and persists publication failure
+in a second transaction; the harness no longer retries HTTP 404. C10 removes the
+legacy comparison route while preserving canonical validation and tenant controls.
+C13 removes eight unwired environment knobs and documents the existing model
+registry, startup binding, and fixed vector dimension. C8 keeps retrieval/security
+gates and computes all four answer metrics as report-only values.
+
+[E-016](./test_evidence.md) records Python checks (169 unit passes; 22 integration
+passes), generated contracts and frontend lint/types, built-image imports/rubric,
+and the four-strategy 48-item API/Celery smoke gate. The unchanged baseline and dataset
+hash match; all runs complete with zero tenant leakage and ACL bypass. Existing
+service-dependent skips are explicit. No migration, private environment edit,
+re-baselining, paid call, or hosted CI run. Worker retries/idempotency and security
+boundaries remain unchanged. Historical E-014 causality remains unproven.
+
+## 2026-09-11 — T-410 evaluation runtime package (local verification)
+
+Resolved R-124 on `feat/T-410-evaluation-runtime-package`, stacked on T-408, before
+the T-405→T-408 stack merges into `main`.
+
+What changed:
+- **Runtime evaluation code** moved into `packages/evaluation`: ranking metrics, the comparison report, and source-label resolution.
+- **The judge rubric** is now `llm` package data, byte-identical, so its SHA-256 is unchanged.
+- **Source labels** resolve from the new tenant-scoped `eval_source_labels` table, which the offline corpus loader writes (migration `0006_eval_source_labels`).
+- **`evals/`** keeps the sweep runner, CI flow, gate, loaders, fixtures, and datasets.
+- **Boundary enforcement:** no product module imports `evals`. The import-linter contracts `product-never-imports-evals` and `evaluation-scope` enforce that, and `container-build` now imports the application inside the built API image.
+- **Decision record:** ADR-016.
+
+How it was verified:
+- **No host tooling:** `uv` is not installed on the host, and `.venv` points at a removed interpreter. All checks therefore ran under Podman in `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` containers (uv 0.9.30), with disposable Postgres and Redis containers.
+- **Lockfile:** `uv.lock` was regenerated, then trimmed to the 26 additive lines for the new package. Unrelated torch marker churn from the newer uv was reverted. The image's pinned uv 0.6.14 accepted the lock under `--frozen`.
+- **Results:** see E-015.
+
+[VERIFY] Not executed:
+- Compose startup of the built images, because no compose provider is installed for Podman.
+- The hosted GitHub Actions run.
+- The generated TypeScript client check, although the OpenAPI documents are unchanged.
+
 ## 2026-09-10 — T-408 chunking experiment (completed)
 
 **Status:** done
@@ -696,46 +738,3 @@ upload walkthrough were not executed in this documentation pass. The Docker CLI
 is unavailable here. Hosted branch protection, external scanning, and any cloud
 infrastructure outside this repository remain unverified. Earlier historical
 execution entries above retain their original scope and evidence.
-
-## 2026-09-11 — T-410 evaluation runtime package (local verification)
-
-Resolved R-124 on `feat/T-410-evaluation-runtime-package`, stacked on T-408, before
-the T-405→T-408 stack merges into `main`.
-
-What changed:
-- **Runtime evaluation code** moved into `packages/evaluation`: ranking metrics, the comparison report, and source-label resolution.
-- **The judge rubric** is now `llm` package data, byte-identical, so its SHA-256 is unchanged.
-- **Source labels** resolve from the new tenant-scoped `eval_source_labels` table, which the offline corpus loader writes (migration `0006_eval_source_labels`).
-- **`evals/`** keeps the sweep runner, CI flow, gate, loaders, fixtures, and datasets.
-- **Boundary enforcement:** no product module imports `evals`. The import-linter contracts `product-never-imports-evals` and `evaluation-scope` enforce that, and `container-build` now imports the application inside the built API image.
-- **Decision record:** ADR-016.
-
-How it was verified:
-- **No host tooling:** `uv` is not installed on the host, and `.venv` points at a removed interpreter. All checks therefore ran under Podman in `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` containers (uv 0.9.30), with disposable Postgres and Redis containers.
-- **Lockfile:** `uv.lock` was regenerated, then trimmed to the 26 additive lines for the new package. Unrelated torch marker churn from the newer uv was reverted. The image's pinned uv 0.6.14 accepted the lock under `--frozen`.
-- **Results:** see E-015.
-
-[VERIFY] Not executed:
-- Compose startup of the built images, because no compose provider is installed for Podman.
-- The hosted GitHub Actions run.
-- The generated TypeScript client check, although the OpenAPI documents are unchanged.
-
-
-### 2026-09-11 — T-411 bounded complexity cleanup
-
-Committed the existing T-410 extraction separately as `b6e68c1`, then implemented
-[T-411](../tasks/T-411-bounded-complexity-cleanup.md) on its own branch.
-C11 commits queued runs before Celery publication and persists publication failure
-in a second transaction; the harness no longer retries HTTP 404. C10 removes the
-legacy comparison route while preserving canonical validation and tenant controls.
-C13 removes eight unwired environment knobs and documents the existing model
-registry, startup binding, and fixed vector dimension. C8 keeps retrieval/security
-gates and computes all four answer metrics as report-only values.
-
-[E-016](./test_evidence.md) records Python checks (169 unit passes; 22 integration
-passes), generated contracts and frontend lint/types, built-image imports/rubric,
-and the four-strategy 48-item API/Celery smoke gate. The unchanged baseline and dataset
-hash match; all runs complete with zero tenant leakage and ACL bypass. Existing
-service-dependent skips are explicit. No migration, private environment edit,
-re-baselining, paid call, or hosted CI run. Worker retries/idempotency and security
-boundaries remain unchanged. Historical E-014 causality remains unproven.

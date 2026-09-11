@@ -1,6 +1,6 @@
 # Architecture — Enterprise RAG Document Intelligence System
 
-> **Status:** Planning. No code written yet.
+> **Status:** Living baseline, revised as implementation evolves (last updated 2026-09-11). Milestone A is partially implemented. Several sections still describe target or proposed behavior; check [current_task.md](../execution/current_task.md) and the ADRs for what is built.
 > **Related:** [product.md](./product.md) · [roadmap.md](./roadmap.md) · [../standards/api_rules.md](../standards/api_rules.md) · [../standards/ai_agent_rules.md](../standards/ai_agent_rules.md)
 
 ---
