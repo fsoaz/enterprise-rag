@@ -213,7 +213,8 @@ cannot be confirmed from the checked-in configuration.
 
 ## 7. Eval Tests
 
-The quality gate. Distinct from correctness tests: these measure *how well*, not *whether*.
+Evaluation reports measure behavior on the golden dataset. Deterministic CI uses stub
+inference and extractive fallback; live-model quality requires a separate measured run.
 
 ### 7.1 Datasets
 
@@ -223,32 +224,47 @@ Golden set in `evals/datasets/`, fixtures in `evals/fixtures/`. Slices per [arch
 
 ### 7.2 Gates
 
-| Metric | Smoke (per PR) | Full (nightly) |
-| --- | --- | --- |
-| `recall@10` | no drop > 2 pts vs. baseline | ≥ 0.90 |
-| `nDCG@10` | no drop > 2 pts | ≥ 0.75 |
-| Faithfulness | no drop > 2 pts | ≥ 0.95 |
-| Citation precision | no drop > 2 pts | ≥ 0.90 |
-| Unsupported-answer rate | no rise > 1 pt | ≤ 2% |
-| Correct abstention | no drop > 3 pts | ≥ 0.90 |
-| Cross-tenant leakage | — | **0** (hard gate) |
-| ACL bypass | — | **0** (hard gate) |
-| Cost per query | no rise > 20% | ≤ $0.03 median |
+The deterministic smoke gate (`evals.harness.gate`) compares `hybrid_rrf` with
+`evals/baselines/t407-smoke.json`. The full scheduled job computes and retains a
+report; it does not measure live-model quality or enforce live quality targets.
 
-A gate breach fails the build. Overriding a gate requires an explicit note in the PR explaining why the new number is correct — and updating the baseline in the same commit, so the override is visible in history.
+| Metric | Deterministic smoke gate |
+| --- | --- |
+| `recall@10` | no drop greater than 0.02 vs. baseline |
+| `nDCG@10` | no drop greater than 0.02 vs. baseline |
+| Faithfulness | report only |
+| Citation precision | report only |
+| Unsupported-answer rate | report only |
+| Correct abstention rate | report only |
+| Cross-tenant leakage | **0**, every run |
+| ACL bypass | **0**, every run |
 
-Injection success rate is deliberately **not** in this table — it is a probabilistic measurement and belongs in § 7.5.
+All four answer metrics are still computed and included in comparison artifacts,
+but are excluded from `checked_metrics`. These deterministic fallback scores do
+not establish semantic answer quality. Focused unit tests retain coverage of
+insufficient lexical evidence, abstention, and extractive citation behavior.
+Dataset/configuration compatibility and baseline security checks still fail closed.
+Cost is reported where available; the deterministic gate has no cost threshold.
+
+A retrieval or security gate breach fails the job. Baseline changes require a
+separate reviewed rationale; this cleanup preserves the committed baseline bytes
+and dataset hashes. Live generation/judging quality, real-model retrieval quality,
+latency, cost, and injection success remain unmeasured by deterministic CI.
+The live release targets remain in [product § 7](../context/product.md#7-success-metrics);
+injection evaluation is described in § 7.5.
 
 ### 7.3 Judge discipline
 
 - Answer-quality judging uses `claude-haiku-4-5` with a **versioned rubric prompt**.
 - The rubric prompt hash is stored on `eval_runs.judge_prompt_hash`.
 - Comparing two runs with different judge hashes is flagged in the dashboard — a judge change must never be read as a quality change.
-- Judge prompts live in `evals/harness/judges/` and change through the normal review process.
+- Judge prompts live in `packages/llm/src/llm/judges/` as package data, so the API and worker images carry them ([ADR-016](../context/architecture.md#adr-016--the-evaluation-runtime-is-a-package-evals-is-offline-tooling)). They change through the normal review process, and the recorded SHA-256 in `manifest.json` is asserted by `packages/llm/tests/test_judge.py`.
 
 ### 7.4 Baselines
 
-Baseline metrics are committed to `evals/baselines/<git-sha>.json`. The smoke gate compares against the baseline of `main`. Updating a baseline is a deliberate, reviewed commit.
+Baseline reports are committed under `evals/baselines/`. The smoke workflow uses
+`t407-smoke.json`; its metadata and dataset hash must remain compatible with the
+current run. Updating a baseline is a deliberate, reviewed commit.
 
 ### 7.5 Adversarial evaluation (probabilistic)
 
@@ -380,8 +396,8 @@ eval-smoke | scheduled eval-full | e2e | adversarial | pre-release load
 | integration | `integration-db` | Yes | Postgres + Redis services, `enterprise_rag_test`, plus a real `inference` process on `INFERENCE_BACKEND=stub` |
 | migrations | `integration-db` | Yes | `upgrade head` → `downgrade -1` → `upgrade head` → seed, from an empty database |
 | **security** (deterministic) | `unit` / `integration-db` | Yes | Never skipped. Fully mocked — no live model call, which is what makes it a legitimate gate. |
-| eval-smoke | `eval-smoke` | Yes | Pull requests; deterministic 48-item stub-inference run across all eight slices, compared with `evals/baselines/t407-smoke.json`. Hosted first-green evidence is pending for R-031. |
-| build | `container-build` | See note below | Builds API/worker, inference, and web images; checks Compose configuration. `next build` also runs in `typecheck`. No image publishing or deployment. |
+| eval-smoke | `eval-smoke` | Yes | Pull requests; deterministic 48-item stub-inference run across all eight slices, compared with `evals/baselines/t407-smoke.json`. Gates `recall@10`, `nDCG@10`, tenant leakage, and ACL bypass; answer metrics are report-only ([§ 7.2](#72-gates)). Hosted first-green evidence is pending for R-031. |
+| build | `container-build` | See note below | Builds API/worker, inference, and web images; checks Compose configuration; imports `api.main`, `worker.tasks.eval`, and the judge rubric inside the built API/worker image (R-124). `next build` also runs in `typecheck`. No image publishing or deployment. |
 | e2e | — | — | Not wired |
 | eval-full | `eval-full` | No (reports) | Scheduled full 320-item, eight-slice run with four configured strategies; retains the report and makes no paid model calls. |
 | **adversarial** (probabilistic) | — | **No** | Nightly and pre-release. Blocks **release**, not merge — see § 7.5. Not wired |

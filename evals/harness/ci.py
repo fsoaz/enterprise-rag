@@ -15,11 +15,9 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from db.session import get_session_factory, set_tenant_context
 from evals.harness.compare import ComparisonConfig, config_dict, run_comparison
-from evals.harness.corpus import DEFAULT_MANIFEST, load_corpus, resolve_tenant_id
-from evals.harness.dataset import validate_dataset
-from evals.harness.metrics import load_dataset
+
+DEFAULT_MANIFEST = Path(__file__).resolve().parents[2] / "evals" / "corpus.json"
 
 SMOKE_ITEMS_PER_SLICE = 6
 DATASET_NAME = "t407-ci-evaluation"
@@ -28,6 +26,9 @@ DATASET_VERSIONS = {"smoke": "smoke-v1", "full": "full-v1"}
 
 def select_items(dataset_dir: Path, *, mode: str) -> list[dict[str, Any]]:
     """Return the full corpus or the stable six-per-slice PR subset."""
+    from evals.harness.dataset import validate_dataset
+    from evals.harness.metrics import load_dataset
+
     if mode not in DATASET_VERSIONS:
         raise ValueError(f"unsupported evaluation mode: {mode}")
     # Validate the committed 320-item artifact before selecting a subset.  This
@@ -53,6 +54,9 @@ def select_items(dataset_dir: Path, *, mode: str) -> list[dict[str, Any]]:
 
 
 async def _load_eval_corpus() -> None:
+    from db.session import get_session_factory, set_tenant_context
+    from evals.harness.corpus import load_corpus, resolve_tenant_id
+
     factory = get_session_factory()
     async with factory() as session, session.begin():
         tenant_id = await resolve_tenant_id(session, "acme")

@@ -12,6 +12,7 @@ members = [
     "enterprise-rag-api",
     "enterprise-rag-db",
     "enterprise-rag-domain",
+    "enterprise-rag-evaluation",
     "enterprise-rag-inference",
     "enterprise-rag-llm",
     "enterprise-rag-observability",
@@ -346,6 +347,7 @@ dependencies = [
     { name = "enterprise-rag-api" },
     { name = "enterprise-rag-db" },
     { name = "enterprise-rag-domain" },
+    { name = "enterprise-rag-evaluation" },
     { name = "enterprise-rag-inference" },
     { name = "enterprise-rag-llm" },
     { name = "enterprise-rag-observability" },
@@ -370,6 +372,7 @@ requires-dist = [
     { name = "enterprise-rag-api", editable = "apps/api" },
     { name = "enterprise-rag-db", editable = "packages/db" },
     { name = "enterprise-rag-domain", editable = "packages/domain" },
+    { name = "enterprise-rag-evaluation", editable = "packages/evaluation" },
     { name = "enterprise-rag-inference", editable = "apps/inference" },
     { name = "enterprise-rag-llm", editable = "packages/llm" },
     { name = "enterprise-rag-observability", editable = "packages/observability" },
@@ -398,6 +401,7 @@ dependencies = [
     { name = "celery" },
     { name = "enterprise-rag-db" },
     { name = "enterprise-rag-domain" },
+    { name = "enterprise-rag-evaluation" },
     { name = "enterprise-rag-llm" },
     { name = "enterprise-rag-observability" },
     { name = "enterprise-rag-retrieval" },
@@ -416,6 +420,7 @@ requires-dist = [
     { name = "celery", specifier = ">=5.4.0" },
     { name = "enterprise-rag-db", editable = "packages/db" },
     { name = "enterprise-rag-domain", editable = "packages/domain" },
+    { name = "enterprise-rag-evaluation", editable = "packages/evaluation" },
     { name = "enterprise-rag-llm", editable = "packages/llm" },
     { name = "enterprise-rag-observability", editable = "packages/observability" },
     { name = "enterprise-rag-retrieval", editable = "packages/retrieval" },
@@ -455,6 +460,21 @@ requires-dist = [
 name = "enterprise-rag-domain"
 version = "0.1.0"
 source = { editable = "packages/domain" }
+
+[[package]]
+name = "enterprise-rag-evaluation"
+version = "0.1.0"
+source = { editable = "packages/evaluation" }
+dependencies = [
+    { name = "enterprise-rag-db" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "enterprise-rag-db", editable = "packages/db" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.36" },
+]
 
 [[package]]
 name = "enterprise-rag-inference"
@@ -543,7 +563,10 @@ dependencies = [
     { name = "celery" },
     { name = "enterprise-rag-db" },
     { name = "enterprise-rag-domain" },
+    { name = "enterprise-rag-evaluation" },
+    { name = "enterprise-rag-llm" },
     { name = "enterprise-rag-observability" },
+    { name = "enterprise-rag-retrieval" },
     { name = "httpx" },
     { name = "pydantic-settings" },
     { name = "pypdf" },
@@ -556,7 +579,10 @@ requires-dist = [
     { name = "celery", specifier = ">=5.4.0" },
     { name = "enterprise-rag-db", editable = "packages/db" },
     { name = "enterprise-rag-domain", editable = "packages/domain" },
+    { name = "enterprise-rag-evaluation", editable = "packages/evaluation" },
+    { name = "enterprise-rag-llm", editable = "packages/llm" },
     { name = "enterprise-rag-observability", editable = "packages/observability" },
+    { name = "enterprise-rag-retrieval", editable = "packages/retrieval" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
     { name = "pypdf", specifier = ">=5.1.0" },

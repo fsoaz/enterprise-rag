@@ -8,6 +8,7 @@ dependencies = [
     "enterprise-rag-retrieval",
     "enterprise-rag-llm",
     "enterprise-rag-observability",
+    "enterprise-rag-evaluation",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
     "pydantic-settings>=2.7.0",

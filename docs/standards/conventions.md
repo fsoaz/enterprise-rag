@@ -64,16 +64,20 @@ packages/domain      → imports nothing from this project
 packages/db          → may import domain
 packages/retrieval   → may import domain, db
 packages/llm         → may import domain
+packages/evaluation  → may import domain, db
 packages/observability → may import nothing from this project
 
 apps/api             → may import any package
 apps/worker          → may import any package
 apps/inference       → may import observability only
 apps/web             → HTTP only; no Python imports
+
+evals/               → offline tooling; may import packages and apps/worker pipeline
 ```
 
 **Forbidden, and the build fails on them:**
 
+- Any module under `apps/*/src` or `packages/*/src` importing `evals` — fixtures, datasets, and harness code are not in any image. Runtime evaluation logic belongs in `packages/evaluation` ([ADR-016](../context/architecture.md#adr-016--the-evaluation-runtime-is-a-package-evals-is-offline-tooling))
 - `packages/*` importing from `apps/*`
 - `apps/api` importing `apps/worker` internals, or the reverse
 - `packages/domain` importing SQLAlchemy, FastAPI, or the Anthropic SDK — the domain layer has no I/O and no framework

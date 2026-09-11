@@ -1,6 +1,6 @@
 # Roadmap — Enterprise RAG Document Intelligence System
 
-> **Status:** Planning. Phase 0 not started.
+> **Status (2026-09-11):** Milestone A in progress: Phases 0–3 and 6a done, Phase 4 partial. Milestone B not started. Live status: [current_task.md](../execution/current_task.md).
 > **Related:** [product.md](./product.md) · [architecture.md](./architecture.md) · [../tasks/README.md](../tasks/README.md)
 
 ---
@@ -225,7 +225,7 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
   is still pending before R-031 can be closed
 - [x] Cross-tenant leakage and ACL bypass both measure **0** on the `permission` slice — `acme-viewer` retrieves only the restricted document, `acme-member` retrieves everything except it
 - [ ] Injection success rate ≤ 1% on the `injection` slice — not measurable without a real `ANTHROPIC_API_KEY`; retrieval on that slice is scored, generation is not
-- [ ] Q-1 and Q-2 are decided and recorded as ADRs in [architecture.md § 15](./architecture.md#15-architecture-decision-records)
+- [x] Q-1 is decided and recorded as [ADR-015](./architecture.md#adr-015--fixed-token-remains-the-production-chunking-default); Q-2 remains open for T-409
 
 > **Status note (2026-07-25).** The harness itself is real: it ingests `evals/fixtures` through the worker pipeline and calls `retrieve()` per item as the item's `acting_user`. It replaced a version that scored `gold_chunk_ids` against themselves and reported 1.0 on metrics it never computed (R-018). Two slices now show honest failures — `versioned` at 0.50 because retrieval has no `as_of` filter (R-030), and `unanswerable` at 0.00 by construction. Dataset volume is also well short of the "minimum 40 items per slice" deliverable: 14 items total.
 
@@ -236,9 +236,26 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
 > baseline is `hybrid_rrf`; the API baseline is the first run ID supplied. T-407
 > remains the CI-gate task, while T-408 and T-409 remain experiment tasks.
 
+> **Status note (2026-09-10).** T-408 is complete. The full and smoke chunking
+> comparisons ran through disposable Postgres, Redis, API, Celery, and stub
+> inference services. Q-1 is resolved by [ADR-015](./architecture.md#adr-015--fixed-token-remains-the-production-chunking-default):
+> `fixed_token` remains the production default and `section_aware` remains an
+> explicit opt-in for future real-BGE validation. T-409 is the remaining Phase 4
+> experiment for Q-2.
+
+> **Status note (2026-09-11).** T-410 moved the evaluation code the API and worker
+> run into `packages/evaluation`, made the judge rubric `llm` package data, and now
+> resolves source labels from `eval_source_labels`
+> ([ADR-016](./architecture.md#adr-016--the-evaluation-runtime-is-a-package-evals-is-offline-tooling), R-124).
+> T-411 commits queued runs before Celery publication, removes the legacy two-run
+> comparison route and unwired configuration, and makes answer metrics report-only
+> while retrieval and security gates stay enforced. Local evidence is E-015 and
+> E-016. Hosted CI (R-031) and live-model quality remain unmeasured, and T-409 is
+> still the remaining Phase 4 experiment.
+
 **Stories:** KW-5, PA-4
 
-**Tasks:** `T-401` fixture corpus · `T-402` golden dataset authoring · `T-403` retrieval metrics · `T-404` answer-quality judges · `T-405` eval tables + API · `T-406` strategy comparison runner · `T-407` CI gates · `T-408` chunking experiment (Q-1) · `T-409` sparse-arm experiment (Q-2)
+**Tasks:** `T-401` fixture corpus · `T-402` golden dataset authoring · `T-403` retrieval metrics · `T-404` answer-quality judges · `T-405` eval tables + API · `T-406` strategy comparison runner · `T-407` CI gates · `T-408` chunking experiment (Q-1) · `T-409` sparse-arm experiment (Q-2) · `T-410` evaluation runtime package (R-124, committed) · `T-411` bounded complexity cleanup (C11, C10, C13, C8)
 
 ---
 

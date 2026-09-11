@@ -28,6 +28,7 @@ from db.models import (
     Tenant,
 )
 from domain.types import (
+    DEFAULT_CHUNKING_STRATEGY,
     AclEffect,
     AclPermission,
     AclResourceType,
@@ -35,6 +36,7 @@ from domain.types import (
     ParseStatus,
 )
 from evals.harness.manifest import CorpusError, read_manifest
+from evaluation.labels import bind_label
 from worker.pipeline.chunk import chunk_document
 from worker.pipeline.embed import embed_passages, embedding_model_meta
 from worker.pipeline.index import index_chunks_search_vectors
@@ -119,10 +121,11 @@ async def _ensure_version_chunks(
     tenant_id: UUID,
     version: DocumentVersion,
     fixture: Path,
+    chunking_strategy: str = DEFAULT_CHUNKING_STRATEGY,
 ) -> None:
     raw = fixture.read_bytes()
     parsed = parse_bytes(raw, mime_type="text/markdown", filename=fixture.name)
-    text_chunks = chunk_document(parsed)
+    text_chunks = chunk_document(parsed, strategy=chunking_strategy)
     if not text_chunks:
         raise CorpusError(f"fixture {fixture.name} produced no chunks")
 
@@ -166,41 +169,12 @@ async def _ensure_version_chunks(
     await session.flush()
 
 
-async def resolve_existing_labels(
-    session: AsyncSession,
-    *,
-    manifest_path: Path = DEFAULT_MANIFEST,
-    tenant_id: UUID,
-) -> dict[str, UUID]:
-    """Map labels to already-loaded version IDs without touching the corpus."""
-    manifest = read_manifest(manifest_path, fixture_dir=FIXTURE_DIR)
-    labels: dict[str, UUID] = {}
-    for doc_spec in manifest["documents"]:
-        document_id = await session.scalar(
-            select(Document.id).where(
-                Document.tenant_id == tenant_id,
-                Document.title == str(doc_spec["title"]),
-            )
-        )
-        if document_id is None:
-            continue
-        for version_no, ver_spec in enumerate(doc_spec["versions"], start=1):
-            version_id = await session.scalar(
-                select(DocumentVersion.id).where(
-                    DocumentVersion.document_id == document_id,
-                    DocumentVersion.version_no == version_no,
-                )
-            )
-            if version_id is not None:
-                labels[str(ver_spec["label"])] = UUID(str(version_id))
-    return labels
-
-
 async def load_corpus(
     session: AsyncSession,
     *,
     manifest_path: Path = DEFAULT_MANIFEST,
     tenant_id: UUID,
+    chunking_strategy: str = DEFAULT_CHUNKING_STRATEGY,
 ) -> dict[str, UUID]:
     """Materialise the manifest and return ``label -> document_version_id``."""
     manifest = read_manifest(manifest_path, fixture_dir=FIXTURE_DIR)
@@ -271,8 +245,16 @@ async def load_corpus(
             await session.flush()
 
             await _ensure_version_chunks(
-                session, tenant_id=tenant_id, version=version, fixture=fixture
+                session,
+                tenant_id=tenant_id,
+                version=version,
+                fixture=fixture,
+                chunking_strategy=chunking_strategy,
             )
             labels[label] = UUID(str(version.id))
+            # Runtime resolution reads this binding, never the manifest (ADR-016).
+            await bind_label(
+                session, tenant_id=tenant_id, label=label, document_version_id=version.id
+            )
 
     return labels

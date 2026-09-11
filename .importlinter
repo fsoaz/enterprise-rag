@@ -5,9 +5,11 @@ root_packages =
     retrieval
     llm
     observability
+    evaluation
     api
     worker
     inference
+    evals
 
 [importlinter:contract:domain-independence]
 name = domain imports nothing from the project
@@ -19,9 +21,11 @@ forbidden_modules =
     retrieval
     llm
     observability
+    evaluation
     api
     worker
     inference
+    evals
 
 [importlinter:contract:packages-no-apps]
 name = packages never import apps
@@ -32,6 +36,7 @@ source_modules =
     retrieval
     llm
     observability
+    evaluation
 forbidden_modules =
     api
     worker
@@ -65,5 +70,39 @@ forbidden_modules =
     db
     retrieval
     llm
+    evaluation
     api
     worker
+    evals
+
+[importlinter:contract:evaluation-scope]
+name = evaluation imports only domain and db from the project
+type = forbidden
+source_modules =
+    evaluation
+forbidden_modules =
+    retrieval
+    llm
+    observability
+    api
+    worker
+    inference
+    evals
+
+# evals/ is offline tooling, fixtures, and datasets. No deployable image contains it,
+# so a product import of it builds cleanly and fails at startup (R-124, ADR-016).
+[importlinter:contract:product-never-imports-evals]
+name = product code never imports the offline evals tooling
+type = forbidden
+source_modules =
+    domain
+    db
+    retrieval
+    llm
+    observability
+    evaluation
+    api
+    worker
+    inference
+forbidden_modules =
+    evals

@@ -176,7 +176,6 @@ jobs:
       TEST_DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@localhost:5432/enterprise_rag_test
       TEST_DATABASE_URL_MIGRATE: postgresql+psycopg://rag_migrate:rag_migrate@localhost:5432/enterprise_rag_test
       DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@localhost:5432/enterprise_rag_test
-      DATABASE_URL_SYNC: postgresql+psycopg://rag_app:rag_app@localhost:5432/enterprise_rag_test
       DATABASE_URL_MIGRATE: postgresql+psycopg://rag_migrate:rag_migrate@localhost:5432/enterprise_rag_test
       DATABASE_URL_MAINT: postgresql+asyncpg://rag_maint:rag_maint@localhost:5432/enterprise_rag_test
       REDIS_URL: redis://localhost:6379/0
@@ -296,6 +295,14 @@ jobs:
           cache-from: type=gha,scope=dockerfile-api
           cache-to: type=gha,mode=max,scope=dockerfile-api
 
+      # A build proves the image assembles, not that its code can import what it needs.
+      # The evaluation API once imported repository-only evals/ modules the image never
+      # contained, and every job stayed green (R-124).
+      - name: API/worker image imports its runtime modules
+        run: >-
+          docker run --rm enterprise-rag-api:latest python -c
+          "import api.main, worker.tasks.eval, llm.judge; llm.judge.rubric_text()"
+
       - name: Build inference image
         uses: docker/build-push-action@v6
         with:
@@ -344,7 +351,6 @@ jobs:
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
       DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@localhost:5432/enterprise_rag_test
-      DATABASE_URL_SYNC: postgresql+psycopg://rag_app:rag_app@localhost:5432/enterprise_rag_test
       DATABASE_URL_MIGRATE: postgresql+psycopg://rag_migrate:rag_migrate@localhost:5432/enterprise_rag_test
       DATABASE_URL_MAINT: postgresql+asyncpg://rag_maint:rag_maint@localhost:5432/enterprise_rag_test
       REDIS_URL: redis://localhost:6379/0

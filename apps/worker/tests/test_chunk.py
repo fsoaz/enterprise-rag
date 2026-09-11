@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from domain.types import INJECTION_RISK_BLOCK, INJECTION_RISK_FLAG
+import pytest
+
+from domain.types import INJECTION_RISK_BLOCK, INJECTION_RISK_FLAG, ChunkingStrategy
 from worker.pipeline.chunk import (
     chunk_document,
     detect_language,
@@ -115,3 +117,47 @@ def test_injection_risk_band_invariant() -> None:
 
 def test_estimate_tokens_word_based() -> None:
     assert estimate_tokens("one two three four") == 4
+
+
+def test_chunking_variants__section_blocks_fit__packs_without_crossing_headings() -> None:
+    text = "# First\n\nalpha beta\n\ngamma delta\n\n# Second\n\nepsilon zeta\n"
+    doc = ParsedDocument(text=text, pages=[ParsedPage(page_no=1, text=text)])
+
+    chunks = chunk_document(
+        doc,
+        target_tokens=4,
+        overlap_tokens=2,
+        strategy=ChunkingStrategy.SECTION_AWARE.value,
+    )
+
+    assert len(chunks) == 3
+    assert "# First" in chunks[0].body and "alpha beta" in chunks[0].body
+    assert "gamma delta" in chunks[1].body
+    assert "# Second" in chunks[2].body and "epsilon zeta" in chunks[2].body
+    assert not any("# First" in chunk.body and "# Second" in chunk.body for chunk in chunks)
+    assert [chunk.ordinal for chunk in chunks] == [0, 1, 2]
+
+
+def test_chunking_variants__long_paragraph__retains_overlap_in_section_aware_mode() -> None:
+    words = " ".join(f"word{i}" for i in range(20))
+    doc = ParsedDocument(text=f"# Policy\n\n{words}", pages=[ParsedPage(1, words)])
+
+    chunks = chunk_document(
+        doc,
+        target_tokens=8,
+        overlap_tokens=2,
+        strategy=ChunkingStrategy.SECTION_AWARE.value,
+    )
+
+    assert len(chunks) >= 3
+    assert set(chunks[1].body.split()[-2:]).intersection(chunks[2].body.split()[:2])
+
+
+def test_chunking_variants__invalid_options_or_strategy__raises() -> None:
+    doc = ParsedDocument(text="one two", pages=[])
+    with pytest.raises(ValueError, match="target_tokens"):
+        chunk_document(doc, target_tokens=0)
+    with pytest.raises(ValueError, match="overlap_tokens"):
+        chunk_document(doc, target_tokens=2, overlap_tokens=2)
+    with pytest.raises(ValueError, match="unsupported chunking strategy"):
+        chunk_document(doc, strategy="unknown")

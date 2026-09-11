@@ -1,9 +1,20 @@
+import json
+from importlib.resources import files
+
 from llm.judge import parse_judgement, rubric_hash, rubric_text
 
 
 def test_rubric_is_versioned_and_hashed() -> None:
     assert "Allowed labels" in rubric_text()
     assert len(rubric_hash()) == 64
+
+
+def test_rubric_hash__packaged_rubric__matches_recorded_manifest() -> None:
+    """Moving the rubric must not change the hash stored on existing eval runs."""
+    manifest = json.loads(files("llm.judges").joinpath("manifest.json").read_text(encoding="utf-8"))
+    (entry,) = manifest["rubrics"]
+    assert entry["file"] == "entailment_v1.md"
+    assert rubric_hash() == entry["sha256"]
 
 
 def test_judge_requires_exactly_one_label_per_pair() -> None:

@@ -14,7 +14,6 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from celery import Celery
-from evals.harness.compare import ComparisonError, build_report
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, BeforeValidator, Field
 from sqlalchemy import func, select
@@ -27,6 +26,8 @@ from api.pagination import apply_descending_cursor, page_limit, page_rows
 from db.models import Chunk, EvalDataset, EvalItem, EvalResult, EvalRun, User
 from domain.errors import ConflictError, NotFoundError
 from domain.temporal import parse_as_of
+from evaluation.labels import resolve_labels
+from evaluation.report import ComparisonError, build_report
 
 router = APIRouter(prefix="/evals", tags=["evaluation"])
 
@@ -273,9 +274,9 @@ async def register_dataset(
         source_ids.update((*item_gold_ids, *item_excluded_ids))
         source_labels.update((*item_gold_labels, *item_excluded_labels))
     if source_labels:
-        from evals.harness.corpus import resolve_existing_labels
-
-        resolved_labels = await resolve_existing_labels(session, tenant_id=user.tenant_id)
+        resolved_labels = await resolve_labels(
+            session, tenant_id=user.tenant_id, labels=source_labels
+        )
         missing = source_labels - resolved_labels.keys()
         if missing:
             raise ConflictError(f"Unknown evaluation source labels: {sorted(missing)}")
@@ -498,12 +499,13 @@ async def create_run(
         started_at=datetime.now(UTC),
     )
     session.add(run)
-    await session.flush()
+    # Workers use a separate connection and must see the queued run before publication.
+    await session.commit()
     try:
         _dispatch_run(run.id)
     except Exception as exc:
         run.params = {**run.params, "status": "failed", "error": str(exc)}
-        await session.flush()
+        await session.commit()
     return _run_out(run)
 
 
@@ -650,34 +652,3 @@ async def list_results(
         ],
         next_cursor=next_cursor,
     )
-
-
-@router.get("/runs/{left_id}/compare/{right_id}")
-async def compare_runs(
-    left_id: UUID,
-    right_id: UUID,
-    user: AclAdminUser,
-    session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> dict[str, Any]:
-    # Compatibility endpoint retained for clients written against T-405.  The
-    # canonical matrix endpoint above is strict about terminal complete runs and
-    # exact result coverage; this endpoint keeps its original lightweight shape.
-    runs = (
-        await session.scalars(
-            select(EvalRun).where(
-                EvalRun.id.in_((left_id, right_id)), EvalRun.tenant_id == user.tenant_id
-            )
-        )
-    ).all()
-    if len(runs) != 2:
-        raise NotFoundError("Evaluation run not found")
-    left, right = sorted(runs, key=lambda run: 0 if run.id == left_id else 1)
-    if left.dataset_id != right.dataset_id:
-        raise ConflictError("Runs use incompatible datasets")
-    return {
-        "compatible": True,
-        "left_run_id": str(left_id),
-        "right_run_id": str(right_id),
-        "left": dict(left.params or {}),
-        "right": dict(right.params or {}),
-    }

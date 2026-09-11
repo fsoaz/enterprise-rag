@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Iterator
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
@@ -150,6 +150,18 @@ def test_canonical_comparison_matrix_and_conflict_coverage(
         assert report["overall"]["recall@10"][run_ids[1]]["delta"] == 0.30000000000000004
         assert report["coverage"]["overall"][run_ids[1]]["result_count"] == 2
 
+        comparison_url = "/api/v1/evals/runs/compare?ids=" + ",".join(run_ids)
+        assert client.get(comparison_url, headers={"X-Dev-User": "acme-member"}).status_code == 403
+        assert client.get(comparison_url, headers={"X-Dev-User": "globex-admin"}).status_code == 404
+        for invalid_ids, expected in [
+            (run_ids[0], 409),
+            (f"{run_ids[0]},{run_ids[0]}", 409),
+            ("invalid,uuid", 409),
+            (f"{run_ids[0]},{uuid4()}", 404),
+        ]:
+            invalid = client.get("/api/v1/evals/runs/compare?ids=" + invalid_ids, headers=headers)
+            assert invalid.status_code == expected, invalid.text
+
         incomplete = client.post(
             "/api/v1/evals/runs",
             headers=headers,
@@ -270,23 +282,23 @@ def test_eval_registration_runs_results_comparison_and_isolation(
             == "queued"
         )
 
-        second = client.post(
+        other_run = client.post(
             "/api/v1/evals/runs",
             headers={"X-Dev-User": "acme-admin"},
             json={
-                "dataset_id": dataset_id,
+                "dataset_id": second_created.json()["id"],
                 "strategy": "dense_only",
                 "embedding_model": "stub-v0",
                 "generator_model": "extractive-fallback",
             },
         )
-        assert second.status_code == 202
-        comparison = client.get(
-            f"/api/v1/evals/runs/{first_id}/compare/{second.json()['id']}",
+        assert other_run.status_code == 202, other_run.text
+        incompatible = client.get(
+            f"/api/v1/evals/runs/compare?ids={first_id},{other_run.json()['id']}",
             headers={"X-Dev-User": "acme-admin"},
         )
-        assert comparison.status_code == 200
-        assert comparison.json()["compatible"] is True
+        assert incompatible.status_code == 409, incompatible.text
+        assert "incompatible datasets" in incompatible.json()["detail"]
 
         hidden = client.get(
             f"/api/v1/evals/datasets/{dataset_id}/items",
@@ -309,3 +321,73 @@ def test_eval_validation_is_problem_response(client: TestClient) -> None:
     assert response.headers["content-type"].startswith("application/problem+json")
     assert response.json()["type"].endswith("/validation-failed")
     assert response.json()["request_id"]
+
+
+@pytest.mark.parametrize("publication_fails", [False, True])
+def test_create_run__dispatch__sees_committed_run_and_persists_outcome(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, publication_fails: bool
+) -> None:
+    name = f"t411-{uuid4().hex}"
+    headers = {"X-Dev-User": "acme-admin"}
+    app_url, migrate_url = integration_database_urls()
+    with psycopg.connect(migrate_url.replace("+asyncpg", "")) as connection:
+        tenant_id = connection.execute("SELECT id FROM tenants WHERE slug = 'acme'").fetchone()[0]
+        other_tenant_id = connection.execute(
+            "SELECT id FROM tenants WHERE slug = 'globex'"
+        ).fetchone()[0]
+
+    def read_params(run_id: UUID, tenant: UUID) -> dict[str, object] | None:
+        # Each read opens a separate connection as rag_app, with tenant RLS active.
+        with psycopg.connect(app_url.replace("+asyncpg", "")) as connection:
+            connection.execute("SELECT set_config('app.current_tenant', %s, true)", (str(tenant),))
+            row = connection.execute(
+                "SELECT params FROM eval_runs WHERE id = %s", (run_id,)
+            ).fetchone()
+            return row[0] if row else None
+
+    observed = []
+
+    def dispatch(run_id: UUID) -> None:
+        observed.append(read_params(run_id, tenant_id))
+        if publication_fails:
+            raise RuntimeError("publication unavailable")
+
+    monkeypatch.setattr("api.routers.evals._dispatch_run", dispatch)
+    try:
+        dataset = client.post(
+            "/api/v1/evals/datasets",
+            headers=headers,
+            json={
+                "name": name,
+                "version": "1",
+                "items": [{"question": "q"}],
+            },
+        )
+        assert dataset.status_code == 201, dataset.text
+        response = client.post(
+            "/api/v1/evals/runs",
+            headers=headers,
+            json={
+                "dataset_id": dataset.json()["id"],
+                "strategy": "hybrid_rrf",
+                "embedding_model": "stub-v0",
+                "generator_model": "extractive-fallback",
+            },
+        )
+        assert response.status_code == 202, response.text
+        assert len(observed) == 1
+        assert observed[0] is not None
+        assert observed[0]["status"] == "queued"
+        run_id = UUID(response.json()["id"])
+        params = read_params(run_id, tenant_id)
+        assert params is not None
+        expected_status = "failed" if publication_fails else "queued"
+        assert params["status"] == expected_status
+        assert read_params(run_id, other_tenant_id) is None
+        lookup = client.get(f"/api/v1/evals/runs/{run_id}", headers=headers)
+        assert lookup.status_code == 200, lookup.text
+        assert lookup.json()["status"] == response.json()["status"] == expected_status
+        if publication_fails:
+            assert params["error"] == response.json()["error"] == "publication unavailable"
+    finally:
+        asyncio.run(_purge([name]))

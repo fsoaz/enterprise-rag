@@ -39,7 +39,6 @@ trap cleanup EXIT
 export TEST_DATABASE_URL="postgresql+asyncpg://rag_app:rag_app@localhost:${publish_port}/${test_db}"
 export TEST_DATABASE_URL_MIGRATE="postgresql+psycopg://rag_migrate:rag_migrate@localhost:${publish_port}/${test_db}"
 export DATABASE_URL="$TEST_DATABASE_URL"
-export DATABASE_URL_SYNC="postgresql+psycopg://rag_app:rag_app@localhost:${publish_port}/${test_db}"
 export DATABASE_URL_MIGRATE="$TEST_DATABASE_URL_MIGRATE"
 export DATABASE_URL_MAINT="postgresql+asyncpg://rag_maint:rag_maint@localhost:${publish_port}/${test_db}"
 export REDIS_URL="redis://localhost:${REDIS_PUBLISH_PORT}/0"

@@ -165,6 +165,41 @@ Source: full-system QA review at `5b26159`, static evidence only, followed by fi
 | R-122 | 2026-07-31 | QA review | `low` | `packages/llm/src/llm/client.py:492` | `cited_text` was `body[:200]`, cutting mid-word with no ellipsis and rendering raw in the UI. | resolved | Word-boundary truncation with an ellipsis, `end_char` consistent with the returned span, no-op below the limit; unit test added. Full detail: [qa_report_2026-07-31.md](./qa_report_2026-07-31.md). |
 | R-123 | 2026-07-31 | remediation | `medium` | `infra/compose/docker-compose.yml` | Introduced while fixing R-102: `--env-file .env` made the root `.env` authoritative for every interpolated variable, including `DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-false}` and the `NEXT_PUBLIC_DEV_AUTH` build arg. A dev machine whose `.env` held the documented escape-hatch value `true` silently got an impersonation-enabled stack from plain `make up`, where compose had previously ignored that file. It also masked R-103, since login appeared to work. The hazard class of R-010 returning by a different route. | resolved | `DEV_AUTH_BYPASS: "false"` hardcoded on api and worker — also closing an unnoticed hole where worker inherited `true` from `env_file` — and `NEXT_PUBLIC_DEV_AUTH: "false"` hardcoded as the web build arg. CI now poisons `.env` with `true` before resolving and fails if either value flips. **A fix that touches configuration resolution can move a security default without mentioning it.** Full detail: [qa_report_2026-07-31.md](./qa_report_2026-07-31.md). |
 
+### Architecture review — 2026-09-11
+
+| ID | Date | Source | Severity | Location | Finding | Status | Resolution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| R-124 | 2026-09-11 | architecture review | `high` | `apps/api/src/api/routers/evals.py:17`, `apps/worker/src/worker/tasks/eval.py:13,145`, `packages/llm/src/llm/judge.py:18` | Evaluation became an API and Celery feature (T-405–T-407) while its report builder, ranking metrics, gold-label resolution, and judge rubric stayed in `evals/harness`, which is offline tooling. The API router imported it at module load, the worker at task registration, and `llm.judge` found its rubric by walking up to the repository root. `Dockerfile.api` has never copied `evals/`, no import-linter contract covered it, and CI starts services from the checkout and only builds images, so every gate was green while the image could not import its own application. Label resolution also re-read and re-hashed every fixture file once per evaluated item. Not present on `main`. | resolved | T-410 added:
+- `packages/evaluation` (metrics, report, labels)
+- the rubric as `llm` package data, with its SHA-256 unchanged
+- DB-backed `eval_source_labels` under forced RLS
+- import-linter contracts `product-never-imports-evals` and `evaluation-scope`
+- an image import check in `container-build`
+
+Verified locally in [E-015](./test_evidence.md):
+- The T-410 image imports the application, while the pre-change image fails with `No module named 'evals'`.
+- A deliberate product import of `evals` breaks the new contract.
+- The migration chain passes from empty.
+- The smoke gate passes against the unchanged baseline.
+
+The hosted GitHub Actions run is still pending. [ADR-016](../context/architecture.md#adr-016--the-evaluation-runtime-is-a-package-evals-is-offline-tooling). |
+
+### Bounded complexity follow-up — 2026-09-11
+
+[T-411](../tasks/T-411-bounded-complexity-cleanup.md) addresses the supplied review
+items in priority order; local verification is recorded in [E-016](./test_evidence.md).
+
+| Item | Finding | Resolution |
+| --- | --- | --- |
+| C11 | API dispatched after flush but before transaction commit, so a worker connection could not yet see the queued run | Commit before dispatch; commit failed publication separately; remove speculative 404 retry window. Code and separate-connection test establish the defect, without conclusively attributing historical E-014 failures to it |
+| C10 | Legacy comparison bypassed canonical completeness checks and exposed a second contract | Remove legacy route, regenerate schemas/types, retain canonical comparison validation and tenant authorization |
+| C13 | Advertised configuration fields had no runtime consumers | Remove unused settings and propagation; document registry model selection, command-line server binding, and fixed vector dimensions |
+| C8 | Deterministic fallback answer scores were treated as answer-quality regression gates | Keep retrieval allowances and all-run zero-tolerance security gates; compute/report four answer metrics without thresholds or checked-metric entries |
+
+Hosted CI and live-model quality remain separate, unmeasured evidence. Worker retry
+classification, durable publication recovery, and the other supplied deferred areas
+are outside this cleanup.
+
 <!--
 Row format:
 | R-001 | 2026-08-03 | self | high | packages/retrieval/fusion.py:52 | RRF applied after the ACL filter instead of inside the CTE | scheduled | T-211 |

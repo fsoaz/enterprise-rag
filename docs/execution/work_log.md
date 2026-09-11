@@ -4,6 +4,111 @@
 > One entry per completed task. Never edit or delete a past entry; correct it with a new one that says what changed.
 > **Related:** [current_task.md](./current_task.md) · [test_evidence.md](./test_evidence.md) · [review_notes.md](./review_notes.md)
 
+## 2026-09-11 — T-411 bounded complexity cleanup
+
+Committed the existing T-410 extraction separately as `b6e68c1`, then implemented
+[T-411](../tasks/T-411-bounded-complexity-cleanup.md) on its own branch.
+C11 commits queued runs before Celery publication and persists publication failure
+in a second transaction; the harness no longer retries HTTP 404. C10 removes the
+legacy comparison route while preserving canonical validation and tenant controls.
+C13 removes eight unwired environment knobs and documents the existing model
+registry, startup binding, and fixed vector dimension. C8 keeps retrieval/security
+gates and computes all four answer metrics as report-only values.
+
+[E-016](./test_evidence.md) records Python checks (169 unit passes; 22 integration
+passes), generated contracts and frontend lint/types, built-image imports/rubric,
+and the four-strategy 48-item API/Celery smoke gate. The unchanged baseline and dataset
+hash match; all runs complete with zero tenant leakage and ACL bypass. Existing
+service-dependent skips are explicit. No migration, private environment edit,
+re-baselining, paid call, or hosted CI run. Worker retries/idempotency and security
+boundaries remain unchanged. Historical E-014 causality remains unproven.
+
+## 2026-09-11 — T-410 evaluation runtime package (local verification)
+
+Resolved R-124 on `feat/T-410-evaluation-runtime-package`, stacked on T-408, before
+the T-405→T-408 stack merges into `main`.
+
+What changed:
+- **Runtime evaluation code** moved into `packages/evaluation`: ranking metrics, the comparison report, and source-label resolution.
+- **The judge rubric** is now `llm` package data, byte-identical, so its SHA-256 is unchanged.
+- **Source labels** resolve from the new tenant-scoped `eval_source_labels` table, which the offline corpus loader writes (migration `0006_eval_source_labels`).
+- **`evals/`** keeps the sweep runner, CI flow, gate, loaders, fixtures, and datasets.
+- **Boundary enforcement:** no product module imports `evals`. The import-linter contracts `product-never-imports-evals` and `evaluation-scope` enforce that, and `container-build` now imports the application inside the built API image.
+- **Decision record:** ADR-016.
+
+How it was verified:
+- **No host tooling:** `uv` is not installed on the host, and `.venv` points at a removed interpreter. All checks therefore ran under Podman in `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` containers (uv 0.9.30), with disposable Postgres and Redis containers.
+- **Lockfile:** `uv.lock` was regenerated, then trimmed to the 26 additive lines for the new package. Unrelated torch marker churn from the newer uv was reverted. The image's pinned uv 0.6.14 accepted the lock under `--frozen`.
+- **Results:** see E-015.
+
+[VERIFY] Not executed:
+- Compose startup of the built images, because no compose provider is installed for Podman.
+- The hosted GitHub Actions run.
+- The generated TypeScript client check, although the OpenAPI documents are unchanged.
+
+## 2026-09-10 — T-408 chunking experiment (completed)
+
+**Status:** done
+**PR:** —
+**Branch:** working tree
+
+### What changed
+
+Completed the full 320-item comparison of fixed-token and section-aware chunking
+through the production ingestion and evaluation path. The variants matched on
+recall and security outcomes; section-aware showed only marginal ranking gains, so
+ADR-015 retains fixed-token as the production default while preserving the opt-in
+variant.
+
+### Decisions
+
+The full run used the deterministic stub inference profile and is wiring evidence,
+not a real-model quality claim. The runner now keeps corpus loads in one async
+event loop, avoiding SQLAlchemy connection reuse across `asyncio.run()` calls.
+
+### Verification
+
+[E-014](./test_evidence.md) records the disposable-service run, complete coverage,
+and measured decision. Focused tests and static checks are rerun after this entry.
+
+### Follow-ups
+
+Hosted T-407 smoke evidence remains required for R-031. A future real-BGE
+comparison can validate whether section-aware chunking merits promotion.
+
+## 2026-09-10 — T-408 chunking experiment (implementation)
+
+**Status:** in_review
+**PR:** —
+**Branch:** working tree
+
+### What changed
+
+Added explicit `fixed_token` and `section_aware` chunking strategies. The existing
+fixed-token behavior remains the default; the section-aware variant packs complete
+Markdown blocks within heading sections and only windows oversized paragraphs.
+The corpus loader and worker now accept an explicit strategy, and the T-408 runner
+executes each variant through the existing T-406 API/Celery evaluation path.
+
+Per-result evaluation metrics now include retrieval latency and empty-retrieval rate.
+The experiment emits separate comparison reports with shared dataset identity,
+configuration, coverage, and paired-bootstrap statistics. No production default,
+database schema, or API contract was changed.
+
+### Verification
+
+The chunking unit suite passes (**15 passed**) and T-406 comparison/gate tests pass
+(**11 passed**). Syntax compilation and `git diff --check` pass. Full project tests,
+disposable-service measurements, and the Q-1 ADR remain pending because the checked-in
+`.venv` points to a missing Python interpreter and no replacement `uv` environment is
+available in the workspace.
+
+### Follow-ups
+
+Run `python -m evals.harness.chunking --mode full` against disposable services, record
+the metric comparison and decision ADR, then advance to T-409. Hosted T-407 smoke
+evidence remains separately required for R-031.
+
 ## 2026-09-07 — T-407 CI evaluation gates (implementation)
 
 **Status:** in_review

@@ -400,7 +400,6 @@ also means it is re-validated on every request and never trusted from an earlier
 | `GET` | `/api/v1/evals/runs/{id}` | Run detail with aggregate metrics | 4 |
 | `GET` | `/api/v1/evals/runs/{id}/results` | Per-item results, paginated | 4 |
 | `GET` | `/api/v1/evals/runs/compare?ids=a,b,c` | Canonical comparison matrix; IDs are ordered and the first run is the baseline. Every run must be complete with exactly one result per dataset item; conflicts use RFC 7807. | 4 |
-| `GET` | `/api/v1/evals/runs/{left_id}/compare/{right_id}` | Legacy two-run compatibility comparison | 4 |
 
 ### Cost & quotas (admin)
 

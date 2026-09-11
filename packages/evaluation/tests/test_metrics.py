@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from evals.harness.metrics import (
+from evaluation.metrics import (
     aggregate_grouped_metrics,
     aggregate_retrieval_metrics,
     deduplicate_retrieved,
+    mrr_at_k,
+    ndcg_at_k,
     precision_at_k,
     recall_at_k,
 )
@@ -11,6 +13,12 @@ from evals.harness.metrics import (
 
 def test_recall() -> None:
     assert recall_at_k(["a", "b"], ["b"], 5) == 1.0
+    assert recall_at_k(["a", "b"], ["z"], 10) == 0.0
+
+
+def test_mrr_and_ndcg() -> None:
+    assert mrr_at_k(["x", "gold"], ["gold"], 10) == 0.5
+    assert ndcg_at_k(["gold"], ["gold"], 10) == 1.0
 
 
 def test_aggregate() -> None:

@@ -88,7 +88,6 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@postgres:5432/enterprise_rag
-      DATABASE_URL_SYNC: postgresql+psycopg://rag_app:rag_app@postgres:5432/enterprise_rag
       DATABASE_URL_MIGRATE: postgresql+asyncpg://rag_migrate:rag_migrate@postgres:5432/enterprise_rag
       DATABASE_URL_MAINT: postgresql+asyncpg://rag_maint:rag_maint@postgres:5432/enterprise_rag
       REDIS_URL: redis://redis:6379/0
@@ -120,7 +119,6 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@postgres:5432/enterprise_rag
-      DATABASE_URL_SYNC: postgresql+psycopg://rag_app:rag_app@postgres:5432/enterprise_rag
       DATABASE_URL_MIGRATE: postgresql+asyncpg://rag_migrate:rag_migrate@postgres:5432/enterprise_rag
       DATABASE_URL_MAINT: postgresql+asyncpg://rag_maint:rag_maint@postgres:5432/enterprise_rag
       REDIS_URL: redis://redis:6379/0

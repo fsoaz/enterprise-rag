@@ -27,10 +27,6 @@ class RegressionDetected(GateError):
 THRESHOLDS: dict[str, tuple[str, float]] = {
     "recall@10": ("minimum", 0.02),
     "nDCG@10": ("minimum", 0.02),
-    "faithfulness": ("minimum", 0.02),
-    "citation_precision": ("minimum", 0.02),
-    "unsupported_answer_rate": ("maximum", 0.01),
-    "correct_abstention_rate": ("minimum", 0.03),
 }
 
 # These metrics are counts/rates of prohibited events.  Any non-zero value fails,

@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from db.models import Chunk, ChunkEmbedding, DocumentVersion, IngestionJob
 from db.session import set_tenant_context
-from domain.types import IngestionStage, JobStatus, ParseStatus
+from domain.types import DEFAULT_CHUNKING_STRATEGY, IngestionStage, JobStatus, ParseStatus
 from worker.celery_app import celery_app
 from worker.pipeline.chunk import chunk_document
 from worker.pipeline.embed import embed_passages, embedding_model_meta
@@ -221,7 +221,10 @@ async def _run_ingest_job_with(
             # --- chunk ---
             current_stage = IngestionStage.CHUNK
             await _set_job_stage(session, job, stage=current_stage)
-            text_chunks = chunk_document(parsed)
+            text_chunks = chunk_document(
+                parsed,
+                strategy=os.environ.get("CHUNKING_STRATEGY", DEFAULT_CHUNKING_STRATEGY),
+            )
             # Replace any prior chunks for this version (re-ingest). One statement
             # rather than a delete per row; embeddings cascade from the FK.
             await session.execute(delete(Chunk).where(Chunk.document_version_id == version.id))

@@ -1,6 +1,6 @@
 # Product Context — Enterprise RAG Document Intelligence System
 
-> **Status:** Planning. No code written yet.
+> **Status (2026-09-11):** Milestone A in progress; Milestone B not started. This document defines product scope, not implementation status; see [current_task.md](../execution/current_task.md).
 > **Related:** [architecture.md](./architecture.md) · [roadmap.md](./roadmap.md)
 
 ---
@@ -262,7 +262,7 @@ Tracked here until resolved; each becomes an ADR in [architecture.md § 15](./ar
 
 | # | Question | Owner | Blocking? |
 | --- | --- | --- | --- |
-| Q-1 | Chunking default — fixed-token with overlap vs. layout-aware semantic sectioning | Eng | No — Phase 1 ships fixed-token, Phase 4 measures |
+| Q-1 | Chunking default — fixed-token with overlap vs. layout-aware semantic sectioning | Eng | Resolved — fixed-token remains default; see [ADR-015](./architecture.md#adr-015--fixed-token-remains-the-production-chunking-default) |
 | Q-2 | Whether to expose BGE-M3's sparse vectors as a third retrieval arm alongside Postgres FTS | Eng | No — Phase 4 experiment |
 | Q-3 | Conversation memory depth for multi-turn chat (last N turns vs. summarized) | Product | No — Phase 3 ships last-3-turns |
 | Q-4 | Whether the eval dashboard is admin-only or also visible to Stewards | Product | No — Phase 6 |

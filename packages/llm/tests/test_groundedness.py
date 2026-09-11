@@ -1,19 +1,7 @@
 from __future__ import annotations
 
-from evals.harness.metrics import mrr_at_k, ndcg_at_k, recall_at_k
-
 from llm.client import CitationSpan
 from llm.groundedness import citation_coverage, groundedness_verdict
-
-
-def test_recall_at_k() -> None:
-    assert recall_at_k(["a", "b", "c"], ["c"], 10) == 1.0
-    assert recall_at_k(["a", "b"], ["z"], 10) == 0.0
-
-
-def test_mrr_and_ndcg() -> None:
-    assert mrr_at_k(["x", "gold"], ["gold"], 10) == 0.5
-    assert ndcg_at_k(["gold"], ["gold"], 10) == 1.0
 
 
 def test_groundedness_abstain() -> None:

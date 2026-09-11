@@ -839,3 +839,32 @@ class EvalResult(Base):
         Index("ix_eval_results__item_id", "item_id"),
         UniqueConstraint("run_id", "item_id", name="uq_eval_results__run_item"),
     )
+
+
+class EvalSourceLabel(Base):
+    """Binding from a dataset's symbolic source label to a loaded document version.
+
+    Written by the offline corpus loader; read by dataset registration and eval runs, so
+    runtime label resolution never needs the fixture files (ADR-016).
+    """
+
+    __tablename__ = "eval_source_labels"
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    document_version_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("document_versions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _updated_at()
+
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", "label", name="pk_eval_source_labels"),
+        Index("ix_eval_source_labels__document_version_id", "document_version_id"),
+    )

@@ -33,9 +33,6 @@ class Settings(BaseSettings):
     dev_auth_bypass: bool = False
 
     anthropic_api_key: str = "sk-ant-replace-me"
-    llm_primary_model: str = "claude-opus-5"
-    llm_judge_model: str = "claude-haiku-4-5"
-    llm_fallback_model: str = "claude-sonnet-5"
 
     redis_url: str = "redis://localhost:16379/0"
     inference_base_url: str = "http://localhost:8001"
@@ -52,8 +49,6 @@ class Settings(BaseSettings):
     # Empty means CORS is disabled (the Next.js BFF is the only intended client).
     cors_allow_origins: str = ""
 
-    api_host: str = "0.0.0.0"
-    api_port: int = 8000
     log_level: str = "INFO"
 
     def async_database_url(self) -> str:
