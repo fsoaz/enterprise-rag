@@ -665,7 +665,7 @@ with exactly one result for every item in the shared dataset. The report include
 overall and per-slice values, signed and absolute baseline deltas, coverage and
 result counts, 95% confidence bounds, and deterministic significance flags. Paired
 significance is calculated over aligned item IDs with 10,000 bootstrap resamples and
-a fixed seed. The legacy two-run route remains available for compatibility.
+a fixed seed. This is the sole comparison endpoint.
 
 ### 11.4 CI integration
 
@@ -680,7 +680,10 @@ a fixed seed. The legacy two-run route remains available for compatibility.
 **Actual: the evaluation jobs are implemented; hosted-run evidence is pending (T-407).**
 The pull-request `eval-smoke` job runs the production API/worker path against disposable
 Postgres and Redis plus deterministic stub inference, selects 48 items across all eight
-slices, and blocks on the committed baseline thresholds. The scheduled `eval-full` job
+slices, and gates recall@10 and nDCG@10 against the committed baseline with 0.02
+allowances. Tenant leakage and ACL bypass must be zero across every run. Faithfulness,
+citation precision, unsupported-answer rate, and correct-abstention rate are computed
+and reported but have no deterministic thresholds. The scheduled `eval-full` job
 runs all 320 items and four configured retrieval strategies, retaining its report without
 paid model calls. The local baseline and focused gate tests are committed in
 `evals/baselines/` and `evals/harness/`.

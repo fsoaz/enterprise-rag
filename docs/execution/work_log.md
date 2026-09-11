@@ -719,3 +719,23 @@ How it was verified:
 - Compose startup of the built images, because no compose provider is installed for Podman.
 - The hosted GitHub Actions run.
 - The generated TypeScript client check, although the OpenAPI documents are unchanged.
+
+
+### 2026-09-11 — T-411 bounded complexity cleanup
+
+Committed the existing T-410 extraction separately as `b6e68c1`, then implemented
+[T-411](../tasks/T-411-bounded-complexity-cleanup.md) on its own branch.
+C11 commits queued runs before Celery publication and persists publication failure
+in a second transaction; the harness no longer retries HTTP 404. C10 removes the
+legacy comparison route while preserving canonical validation and tenant controls.
+C13 removes eight unwired environment knobs and documents the existing model
+registry, startup binding, and fixed vector dimension. C8 keeps retrieval/security
+gates and computes all four answer metrics as report-only values.
+
+[E-016](./test_evidence.md) records Python checks (169 unit passes; 22 integration
+passes), generated contracts and frontend lint/types, built-image imports/rubric,
+and the four-strategy 48-item API/Celery smoke gate. The unchanged baseline and dataset
+hash match; all runs complete with zero tenant leakage and ACL bypass. Existing
+service-dependent skips are explicit. No migration, private environment edit,
+re-baselining, paid call, or hosted CI run. Worker retries/idempotency and security
+boundaries remain unchanged. Historical E-014 causality remains unproven.

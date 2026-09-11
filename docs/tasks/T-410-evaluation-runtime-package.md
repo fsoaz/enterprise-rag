@@ -4,7 +4,7 @@
 | --- | --- |
 | **ID** | `T-410` |
 | **Phase** | `4 — Evaluation` |
-| **Status** | `in_progress` |
+| **Status** | `done` |
 | **Branch** | `feat/T-410-evaluation-runtime-package` |
 | **Size** | `M` |
 | **Depends on** | `T-405`, `T-406`, `T-407`, `T-408` |
@@ -122,9 +122,9 @@ is lost.
 
 ## Completion Record
 
-- **Completed:** `<YYYY-MM-DD>`
-- **PR:** `<link>`
-- **Evidence:** [test_evidence.md](../execution/test_evidence.md) entry `<id>`
-- **Work log:** [work_log.md](../execution/work_log.md) entry `<date>`
-- **Deviations from plan:** `<what changed and why, or "none">`
-- **Follow-ups raised:** `<task IDs or review_notes IDs, or "none">`
+- **Completed:** `2026-09-11` (local; committed as `b6e68c1`)
+- **PR:** pending; hosted CI not yet measured
+- **Evidence:** [test_evidence.md](../execution/test_evidence.md) entry `E-015`
+- **Work log:** [work_log.md](../execution/work_log.md) entry `2026-09-11`
+- **Deviations from plan:** see E-015 for local tooling substitutions
+- **Follow-ups raised:** T-411 (bounded complexity cleanup)

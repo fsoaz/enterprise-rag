@@ -499,12 +499,13 @@ async def create_run(
         started_at=datetime.now(UTC),
     )
     session.add(run)
-    await session.flush()
+    # Workers use a separate connection and must see the queued run before publication.
+    await session.commit()
     try:
         _dispatch_run(run.id)
     except Exception as exc:
         run.params = {**run.params, "status": "failed", "error": str(exc)}
-        await session.flush()
+        await session.commit()
     return _run_out(run)
 
 
@@ -651,34 +652,3 @@ async def list_results(
         ],
         next_cursor=next_cursor,
     )
-
-
-@router.get("/runs/{left_id}/compare/{right_id}")
-async def compare_runs(
-    left_id: UUID,
-    right_id: UUID,
-    user: AclAdminUser,
-    session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> dict[str, Any]:
-    # Compatibility endpoint retained for clients written against T-405.  The
-    # canonical matrix endpoint above is strict about terminal complete runs and
-    # exact result coverage; this endpoint keeps its original lightweight shape.
-    runs = (
-        await session.scalars(
-            select(EvalRun).where(
-                EvalRun.id.in_((left_id, right_id)), EvalRun.tenant_id == user.tenant_id
-            )
-        )
-    ).all()
-    if len(runs) != 2:
-        raise NotFoundError("Evaluation run not found")
-    left, right = sorted(runs, key=lambda run: 0 if run.id == left_id else 1)
-    if left.dataset_id != right.dataset_id:
-        raise ConflictError("Runs use incompatible datasets")
-    return {
-        "compatible": True,
-        "left_run_id": str(left_id),
-        "right_run_id": str(right_id),
-        "left": dict(left.params or {}),
-        "right": dict(right.params or {}),
-    }

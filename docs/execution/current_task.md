@@ -9,12 +9,12 @@
 
 | Field | Value |
 | --- | --- |
-| Task | T-410 — Extract the evaluation runtime from `evals/` tooling |
-| File | [T-410-evaluation-runtime-package.md](../tasks/T-410-evaluation-runtime-package.md) |
-| Status | in_progress — implementation and local verification complete ([E-015](./test_evidence.md)); awaiting commit, PR, and hosted CI |
-| Branch | feat/T-410-evaluation-runtime-package |
+| Task | T-411 — Bound evaluation complexity after T-410 |
+| File | [T-411-bounded-complexity-cleanup.md](../tasks/T-411-bounded-complexity-cleanup.md) |
+| Status | done — local implementation and verification complete ([E-016](./test_evidence.md)); hosted CI remains pending |
+| Branch | refactor/T-411-bounded-complexity-cleanup |
 | Started | 2026-09-11 |
-| Base | T-408 |
+| Base | T-410 (`b6e68c1`, committed separately) |
 
 T-410 resolves R-124 before the T-405→T-408 stack merges into `main`, which is the
 baseline and does not contain the coupling.
@@ -73,6 +73,8 @@ task file should be created and marked `in_progress` before code changes begin.
 
 | Date | Task | Summary |
 | --- | --- | --- |
+| 2026-09-11 | T-411 | Dispatch ordering, canonical comparison, supported configuration, and deterministic gate scope; E-016 local evidence |
+| 2026-09-11 | T-410 | Evaluation runtime extraction committed as `b6e68c1`; E-015 local evidence |
 | 2026-09-10 | T-408 | Deterministic fixed-token/section-aware chunking experiment, full 320-item comparison, and ADR-015 decision to retain the fixed-token default |
 | 2026-09-07 | T-406 | JSON-configured strategy sweeps, persisted child runs, model identity propagation, canonical comparison matrix, paired bootstrap significance, and Podman-backed integration evidence |
 | 2026-09-07 | T-405 | Evaluation datasets, production-path worker execution, versioned Haiku judging, metrics, cost ledger reconciliation, idempotent retries, API contracts, and Podman-backed integration evidence |

@@ -241,3 +241,13 @@ See [current_task.md](docs/execution/current_task.md).
 ## Licence
 
 See [LICENSE](LICENSE).
+
+### Runtime configuration
+
+LLM model identities are selected through `packages/llm/src/llm/models.py`;
+evaluation runs record their requested generator identity. Server binding comes
+from the `uvicorn --host ... --port ...` startup command (the API image uses
+`0.0.0.0:8000`). Embeddings have a fixed 1024-dimensional database/inference
+contract. `EMBEDDING_MODEL` and `RERANK_MODEL` configure the inference backend;
+`EMBEDDING_MODEL_NAME` selects the stored embedding generation used by retrieval.
+See `.env.example` for supported environment configuration.

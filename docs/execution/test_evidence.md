@@ -5,6 +5,83 @@
 
 Claiming a task is done requires an entry here. "Tests pass" without a command and an output is not evidence.
 
+### E-016 — 2026-09-11 — T-411 bounded complexity cleanup (local)
+
+**Base:** T-410 committed separately as `b6e68c1`; branch
+`refactor/T-411-bounded-complexity-cleanup`. No hosted CI run was performed.
+
+**Environment:** Podman, Python 3.12.12 and uv 0.9.30 in disposable `t411-tools`,
+with locked dependencies installed using `uv sync --all-packages --group dev --frozen`.
+Host Node 22.23.1 / npm 10.9.8. Disposable pgvector/Postgres 16 and Redis 7 shared
+the tools container network. `enterprise_rag_test` was used for integration;
+`enterprise_rag_smoke_test` was separately created, initialized, migrated through
+`0006_eval_source_labels`, and seeded for the smoke comparison. Stub inference,
+current-source API and Celery used the explicit replacement Anthropic sentinel;
+no paid model calls. No private `.env` file was changed.
+
+| Command / check | Result |
+| --- | --- |
+| `uv run ruff check .` / `uv run ruff format --check .` | **pass**, 425 Python files formatted |
+| `uv run mypy` / `uv run lint-imports` | **pass**, 75 source files; 7 contracts kept |
+| `uv run pytest -q -m "not integration"` | **169 passed, 1 skipped, 25 deselected** |
+| `uv run pytest -q -rs -m integration` | **22 passed, 3 skipped, 170 deselected** |
+| Focused API integration after adding cross-dataset rejection coverage: `uv run pytest -q -rs -m integration apps/api/tests/test_evals_integration.py` | **5 passed**, no skips; changed-file Ruff checks pass |
+| `make openapi openapi-check` (inside tools container) | **pass**, both schema documents regenerated and in sync |
+| `npm ci --prefix apps/web` | **pass**, locked install; npm reports 9 existing advisories (3 moderate, 5 high, 1 critical); dependencies unchanged |
+| `npm run generate:api-types --prefix apps/web` | **pass**, generated client updated |
+| `npm run lint --prefix apps/web` | **pass**, 28 files checked |
+| `apps/web/node_modules/.bin/tsc --noEmit -p apps/web/tsconfig.json` | **pass** |
+| `podman build -f infra/compose/Dockerfile.api -t localhost/t411-api:latest .` | **pass**, image `c9333c2c1356` |
+| `podman run --rm --network none localhost/t411-api:latest python -c '…'` importing `api.main`, `worker.tasks.eval`, `llm.judge` and reading rubric/manifest with `importlib.resources` | **pass**; printed rubric hash equals manifest SHA-256 `5b090686f49ac59fdcdd352fb38ff9670df0b851d9e74a918cf9a58c70c2548a` |
+| `uv run python -m evals.harness.ci --mode smoke --output /tmp/t411-smoke.json` through current-source API/Celery | **pass**, 4 strategies × 48 items, all complete with 48/48 results |
+| `uv run python -m evals.harness.gate --report /tmp/t411-smoke.json --baseline evals/baselines/t407-smoke.json --output /tmp/t411-gate.json` | **passed**, 0 violations; only retrieval and security in `checked_metrics` |
+| `git diff --check`; diff against baseline, datasets, corpus, migrations, worker runtime, inference backend, dimension constants, rubric and lockfile | **pass**, preserved paths have no changes |
+
+**Focused regression coverage:**
+- During `_dispatch_run`, a separate psycopg connection using `rag_app` and an
+  explicit transaction-local tenant context reads the queued run. Another tenant
+  cannot read it. Both successful and injected-failure publication cases pass.
+- Injected publication failure retains HTTP 202 and `failed`/error after a fresh
+  tenant-scoped database read and immediate API lookup. Injected commit failure
+  propagates and the dispatcher is never called.
+- Harness 404 raises on the first lookup without sleeping; queued status continues
+  to poll until the normal timeout. Canonical comparison retains complete-result
+  coverage, invalid/duplicate/missing ID checks, cross-dataset rejection, admin
+  authorization, and cross-tenant 404. The legacy path is absent from OpenAPI.
+- Both retrieval metrics fail beyond the 0.02 allowance. Both security metrics
+  fail for either run, even at 0.00001, and a leaking committed baseline is rejected.
+  Regressing all four answer metrics leaves the report unchanged and passes the gate.
+- Existing lexical-evidence fallback, abstention, groundedness, extractive source
+  citation and truncation tests remain in the passing unit suite. Worker retry
+  registration and answer-metric computation tests remain unchanged.
+
+The smoke dataset hash is unchanged:
+`32b0b7b1583fb163b6b8aa29a0af0fa128063fc4f29ee12bfbd5707fb88ea9a5`.
+All dataset metadata equals the baseline. `hybrid_rrf` values also equal the baseline:
+recall@10 **0.1041666667**, nDCG@10 **0.0526179219**, faithfulness **0.0416666667**,
+citation precision **0.3333333333**, unsupported-answer rate **1.0**, correct-abstention
+rate **0.3333333333**. Tenant leakage and ACL bypass are **0** for every run.
+API/worker smoke logs contain no HTTP 404 or Anthropic URLs. Local artifacts copied
+to `/tmp/t411-smoke.json`, `/tmp/t411-gate.json`, `/tmp/t411-api.log`, and
+`/tmp/t411-worker.log` are disposable; no baseline was rewritten.
+
+**Limits and tooling substitutions:** The host has no usable uv/Make toolchain;
+Python checks ran in Podman and Make was installed only in that disposable container.
+`make lint typecheck` was executed as its constituent Python and frontend commands.
+`make test-integration` was executed as equivalent disposable database setup plus
+pytest because Docker Compose is unavailable. The unit skip is the existing chat
+service dependency check; its run also emitted one asyncpg cancellation warning.
+Integration skips: two MinIO-dependent ingest tests and an erasure authorization test
+with no document fixture. No new test was skipped. Initial sandboxed npm installation
+failed on cache/log access; the permitted retry succeeded. An initial local report
+summary expected a top-level status in the older baseline; it was corrected without
+changing the baseline or gate. Hosted CI, live-model quality, paid-model cost and
+semantic retrieval quality remain unmeasured. R-031 remains open.
+
+The dispatch-before-commit defect is verified from source and the new connection
+visibility test. This does **not** establish the cause of historical E-014 failures;
+E-014 remains a record of the earlier execution and retry workaround.
+
 ### E-015 — 2026-09-11 — T-410 evaluation runtime package (Podman)
 
 **Environment:**

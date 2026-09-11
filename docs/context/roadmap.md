@@ -245,7 +245,7 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
 
 **Stories:** KW-5, PA-4
 
-**Tasks:** `T-401` fixture corpus · `T-402` golden dataset authoring · `T-403` retrieval metrics · `T-404` answer-quality judges · `T-405` eval tables + API · `T-406` strategy comparison runner · `T-407` CI gates · `T-408` chunking experiment (Q-1) · `T-409` sparse-arm experiment (Q-2) · `T-410` evaluation runtime package (R-124)
+**Tasks:** `T-401` fixture corpus · `T-402` golden dataset authoring · `T-403` retrieval metrics · `T-404` answer-quality judges · `T-405` eval tables + API · `T-406` strategy comparison runner · `T-407` CI gates · `T-408` chunking experiment (Q-1) · `T-409` sparse-arm experiment (Q-2) · `T-410` evaluation runtime package (R-124, committed) · `T-411` bounded complexity cleanup (C11, C10, C13, C8)
 
 ---
 

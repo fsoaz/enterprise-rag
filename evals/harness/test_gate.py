@@ -64,8 +64,8 @@ def test_gate_accepts_a_compatible_known_good_report() -> None:
 def test_gate_rejects_missing_required_metrics() -> None:
     baseline = _envelope()
     current = deepcopy(baseline)
-    del current["report"]["overall"]["faithfulness"]  # type: ignore[index]
-    with pytest.raises(GateError, match="faithfulness"):
+    del current["report"]["overall"]["recall@10"]  # type: ignore[index]
+    with pytest.raises(GateError, match="recall@10"):
         evaluate_gate(current, baseline)
 
 
@@ -83,9 +83,52 @@ def test_gate_detects_a_deliberate_quality_regression() -> None:
         evaluate_gate(current, baseline)
 
 
-def test_gate_detects_zero_tolerance_security_failures() -> None:
+@pytest.mark.parametrize("metric", ["tenant_leakage", "acl_bypass"])
+@pytest.mark.parametrize("run_id", ["baseline", "candidate"])
+def test_gate__security_violation_in_any_run__fails(metric: str, run_id: str) -> None:
     baseline = _envelope()
     current = _envelope()
-    current["report"]["overall"]["acl_bypass"]["candidate"]["value"] = 0.01  # type: ignore[index]
-    with pytest.raises(RegressionDetected, match="acl_bypass"):
+    current["report"]["overall"][metric][run_id]["value"] = 0.00001  # type: ignore[index]
+    with pytest.raises(RegressionDetected, match=metric):
         evaluate_gate(current, baseline)
+    with pytest.raises(GateError, match="committed baseline has non-zero"):
+        evaluate_gate(baseline, current)
+
+
+@pytest.mark.parametrize("metric", ["recall@10", "nDCG@10"])
+@pytest.mark.parametrize("drop,passes", [(0.019, True), (0.021, False)])
+def test_gate__retrieval_allowance__enforced(metric: str, drop: float, passes: bool) -> None:
+    baseline = _envelope()
+    current = _envelope()
+    current["report"]["overall"][metric]["baseline"]["value"] = 0.8 - drop  # type: ignore[index]
+    if passes:
+        assert evaluate_gate(current, baseline).passed
+    else:
+        with pytest.raises(RegressionDetected, match=metric):
+            evaluate_gate(current, baseline)
+
+
+def test_gate__answer_metrics_regress__remain_report_only() -> None:
+    baseline = _envelope()
+    current = _envelope()
+    values = {
+        "faithfulness": 0.0,
+        "citation_precision": 0.0,
+        "unsupported_answer_rate": 1.0,
+        "correct_abstention_rate": 0.0,
+    }
+    for metric, value in values.items():
+        for run_id in ("baseline", "candidate"):
+            current["report"]["overall"][metric][run_id]["value"] = value  # type: ignore[index]
+    report = deepcopy(current)
+    result = evaluate_gate(current, baseline)
+    assert result.passed
+    assert set(result.checked_metrics) == {
+        "recall@10",
+        "nDCG@10",
+        "tenant_leakage:baseline",
+        "tenant_leakage:candidate",
+        "acl_bypass:baseline",
+        "acl_bypass:candidate",
+    }
+    assert current == report

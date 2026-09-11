@@ -347,19 +347,8 @@ def run_comparison(config: ComparisonConfig) -> dict[str, Any]:
         )
         run_id = str(row["id"])
         run_ids.append(run_id)
-        lookup_deadline = time.monotonic() + min(30.0, config.timeout_seconds)
         while True:
-            try:
-                current = _http_json(f"{config.api_url}/evals/runs/{run_id}", user=config.user)
-            except ComparisonError as exc:
-                # The API commits the run and publishes the Celery task in adjacent
-                # transactions. A worker or read replica can briefly race the
-                # status lookup; tolerate that narrow eventual-consistency window,
-                # but do not turn a permanently missing run into an hour-long poll.
-                if "HTTP Error 404" not in str(exc) or time.monotonic() >= lookup_deadline:
-                    raise
-                time.sleep(config.poll_interval_seconds)
-                continue
+            current = _http_json(f"{config.api_url}/evals/runs/{run_id}", user=config.user)
             status = str(current.get("status", "queued"))
             if status in TERMINAL_STATUSES:
                 run_rows.append(current)

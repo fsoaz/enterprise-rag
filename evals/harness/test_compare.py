@@ -97,38 +97,37 @@ def test_runner_uses_sequential_run_worker_flow(monkeypatch: pytest.MonkeyPatch)
     )
 
 
-def test_runner_retries_transient_run_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
-    dataset_id = str(uuid4())
-    config = validate_config(
-        {
-            "dataset_id": dataset_id,
-            "poll_interval_seconds": 0.001,
-            "bootstrap_resamples": 100,
-        }
-    )
-    missing_once = {"value": True}
+def test_runner__run_not_found__fails_without_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = validate_config({"dataset_id": str(uuid4())})
+    lookups = []
 
     def fake_request(url: str, *, method: str = "GET", body: object = None, user: str) -> object:
-        del body, user
         if method == "POST":
-            return {"id": str(uuid4())}
-        if "/results" in url:
-            return {"data": [{"item_id": "item-1", "metrics": {"recall@10": 1.0}}]}
-        if "/items" in url:
-            return {"data": [{"id": "item-1", "slice": "default"}]}
-        if missing_once["value"]:
-            missing_once["value"] = False
-            raise ComparisonError(
-                "comparison API request failed: GET /evals/runs/id: HTTP Error 404"
-            )
-        return {
-            "id": url.rsplit("/", 1)[-1],
-            "dataset_id": dataset_id,
-            "strategy": "hybrid_rrf",
-            "status": "complete",
-            "params": {"status": "complete"},
-        }
+            return {"id": "missing"}
+        lookups.append(url)
+        raise ComparisonError("comparison API request failed: HTTP Error 404")
+
+    def unexpected_sleep(seconds: float) -> None:
+        pytest.fail("404 must fail immediately without sleeping")
 
     monkeypatch.setattr("evals.harness.compare._http_json", fake_request)
-    report = run_comparison(config)
-    assert report["dataset"]["item_count"] == 1
+    monkeypatch.setattr("evals.harness.compare.time.sleep", unexpected_sleep)
+    with pytest.raises(ComparisonError, match="HTTP Error 404"):
+        run_comparison(config)
+    assert len(lookups) == 1
+
+
+def test_runner__queued_run__polls_until_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = validate_config({"dataset_id": str(uuid4()), "timeout_seconds": 1})
+    clock = iter([0.0, 0.5, 1.0])
+    sleeps = []
+
+    def fake_request(url: str, *, method: str = "GET", body: object = None, user: str) -> object:
+        return {"id": "queued", "status": "queued"}
+
+    monkeypatch.setattr("evals.harness.compare._http_json", fake_request)
+    monkeypatch.setattr("evals.harness.compare.time.monotonic", lambda: next(clock))
+    monkeypatch.setattr("evals.harness.compare.time.sleep", sleeps.append)
+    with pytest.raises(ComparisonError, match="before timeout"):
+        run_comparison(config)
+    assert sleeps == [config.poll_interval_seconds]

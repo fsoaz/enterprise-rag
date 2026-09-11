@@ -38,7 +38,6 @@ jobs:
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
       DATABASE_URL: postgresql+asyncpg://rag_app:rag_app@localhost:5432/enterprise_rag_test
-      DATABASE_URL_SYNC: postgresql+psycopg://rag_app:rag_app@localhost:5432/enterprise_rag_test
       DATABASE_URL_MIGRATE: postgresql+psycopg://rag_migrate:rag_migrate@localhost:5432/enterprise_rag_test
       DATABASE_URL_MAINT: postgresql+asyncpg://rag_maint:rag_maint@localhost:5432/enterprise_rag_test
       REDIS_URL: redis://localhost:6379/0

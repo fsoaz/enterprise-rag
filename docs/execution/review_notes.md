@@ -184,6 +184,22 @@ Verified locally in [E-015](./test_evidence.md):
 
 The hosted GitHub Actions run is still pending. [ADR-016](../context/architecture.md#adr-016--the-evaluation-runtime-is-a-package-evals-is-offline-tooling). |
 
+### Bounded complexity follow-up — 2026-09-11
+
+[T-411](../tasks/T-411-bounded-complexity-cleanup.md) addresses the supplied review
+items in priority order; local verification is recorded in [E-016](./test_evidence.md).
+
+| Item | Finding | Resolution |
+| --- | --- | --- |
+| C11 | API dispatched after flush but before transaction commit, so a worker connection could not yet see the queued run | Commit before dispatch; commit failed publication separately; remove speculative 404 retry window. Code and separate-connection test establish the defect, without conclusively attributing historical E-014 failures to it |
+| C10 | Legacy comparison bypassed canonical completeness checks and exposed a second contract | Remove legacy route, regenerate schemas/types, retain canonical comparison validation and tenant authorization |
+| C13 | Advertised configuration fields had no runtime consumers | Remove unused settings and propagation; document registry model selection, command-line server binding, and fixed vector dimensions |
+| C8 | Deterministic fallback answer scores were treated as answer-quality regression gates | Keep retrieval allowances and all-run zero-tolerance security gates; compute/report four answer metrics without thresholds or checked-metric entries |
+
+Hosted CI and live-model quality remain separate, unmeasured evidence. Worker retry
+classification, durable publication recovery, and the other supplied deferred areas
+are outside this cleanup.
+
 <!--
 Row format:
 | R-001 | 2026-08-03 | self | high | packages/retrieval/fusion.py:52 | RRF applied after the ACL filter instead of inside the CTE | scheduled | T-211 |
