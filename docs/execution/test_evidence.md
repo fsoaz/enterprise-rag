@@ -5,6 +5,30 @@
 
 Claiming a task is done requires an entry here. "Tests pass" without a command and an output is not evidence.
 
+### E-017 — 2026-09-27 — T-412 documentation accuracy audit (local)
+
+**Base:** `fb43113` on branch `docs/T-412-documentation-accuracy-audit`. Documentation
+and `.env.example` only; no application code, tests, or generated files changed.
+
+**Environment:** host Python 3.12 from the existing `.venv`. `uv` and the Docker CLI
+were not available, so no Make target that wraps them was executed.
+
+| Command / check | Result |
+| --- | --- |
+| Relative-link and anchor resolver (GitHub heading-slug rules) over README, AGENTS, `apps/web/README.md`, `docs/guides`, `docs/standards`, `docs/context`, `docs/tasks/README.md`, the T-412 task file, `current_task.md`, and `review_notes.md` | **pass**, 357 links in 15 files, 0 failures; a deliberately broken anchor was reported |
+| `bash -n` on every fenced `bash` block in the edited reader-facing documents | **pass**, 27 blocks |
+| `app.openapi()` (imported with the pytest source paths) compared byte-for-byte with `openapi.json` and `apps/web/openapi.json` — the `make openapi-check` comparison without `uv` | **pass**, both match |
+| Endpoint rows in `api_rules.md` § 12 compared with `openapi.json` paths and methods | **pass**, 57 rows; every **Implemented** row exists and every existing route is marked |
+| Environment-variable names and `make` targets named in edited documents searched in code, configuration, and the Makefile | **pass**; unmatched tokens were prose, not identifiers |
+| Test-name convention count over `test_*.py` | 14 of 151 functions match `test_<unit>__<condition>__<expected>` (R-131) |
+| `git diff --check` | **pass** |
+
+[VERIFY] Not executed: `make up`, Compose startup, Keycloak sign-in, the upload
+walkthrough, the disposable-database evaluation procedure added to the
+local-development guide, and the new Keycloak/web readiness probes. The guide's
+commands are consistent with the inspected Makefile, Compose file, CI workflow,
+and scripts, but they have not been run in this environment.
+
 ### E-016 — 2026-09-11 — T-411 bounded complexity cleanup (local)
 
 **Base:** T-410 committed separately as `b6e68c1`; branch

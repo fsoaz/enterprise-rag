@@ -1,6 +1,6 @@
 # Product Context — Enterprise RAG Document Intelligence System
 
-> **Status (2026-09-11):** Milestone A in progress; Milestone B not started. This document defines product scope, not implementation status; see [current_task.md](../execution/current_task.md).
+> **Status (2026-09-27):** Milestone A in progress. Some Milestone B capabilities exist in partial form (noted below). This document defines product scope, not implementation status; see [current_task.md](../execution/current_task.md) and the section status labels in [architecture.md](./architecture.md).
 > **Related:** [architecture.md](./architecture.md) · [roadmap.md](./roadmap.md)
 
 ---
@@ -96,9 +96,9 @@ Scope is delivered in two milestones — see [roadmap.md § Two release boundari
 
 - Role-based access control per collection and per document
 - Tenant isolation enforced at both the application layer and the database layer
-- Per-query cost tracking — **A** · per-tenant budgets and quotas — **B**
-- Retry, timeout, circuit-breaker, and model-fallback policies — **B**
-- Evaluation datasets, an offline evaluation harness, and a retrieval-strategy comparison
+- Per-query cost tracking — **A** · per-tenant budgets and quotas — **B** (a rolling 24-hour tenant budget and per-user rate limits already exist)
+- Retry, timeout, circuit-breaker, and model-fallback policies — **B** (Anthropic retries, request timeouts, and an extractive fallback already exist)
+- Evaluation datasets, an offline evaluation harness, a tenant-scoped evaluation API, and a retrieval-strategy comparison
 - Feedback loop (thumbs up/down + reason) feeding the evaluation corpus
 
 **Interfaces**
@@ -264,5 +264,5 @@ Tracked here until resolved; each becomes an ADR in [architecture.md § 15](./ar
 | --- | --- | --- | --- |
 | Q-1 | Chunking default — fixed-token with overlap vs. layout-aware semantic sectioning | Eng | Resolved — fixed-token remains default; see [ADR-015](./architecture.md#adr-015--fixed-token-remains-the-production-chunking-default) |
 | Q-2 | Whether to expose BGE-M3's sparse vectors as a third retrieval arm alongside Postgres FTS | Eng | No — Phase 4 experiment |
-| Q-3 | Conversation memory depth for multi-turn chat (last N turns vs. summarized) | Product | No — Phase 3 ships last-3-turns |
+| Q-3 | Conversation memory depth for multi-turn chat (last N turns vs. summarized) | Product | No — Phase 3 replays the last six prior messages (three exchanges); summarization undecided |
 | Q-4 | Whether the eval dashboard is admin-only or also visible to Stewards | Product | No — Phase 6 |

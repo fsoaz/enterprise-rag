@@ -57,7 +57,7 @@ Canonical layout is in [architecture.md § 16](../context/architecture.md#16-rep
 
 ## 4. Module Boundaries
 
-Enforced by `import-linter` in CI. The contract:
+The intended layering is below. `import-linter` ([.importlinter](../../.importlinter)) enforces the rules listed under **Forbidden**; the remaining per-package allowances (for `db`, `retrieval`, `llm`, and `observability`) are enforced by review only.
 
 ```text
 packages/domain      → imports nothing from this project
@@ -75,12 +75,16 @@ apps/web             → HTTP only; no Python imports
 evals/               → offline tooling; may import packages and apps/worker pipeline
 ```
 
-**Forbidden, and the build fails on them:**
+**Forbidden, and `make typecheck` fails on them:**
 
 - Any module under `apps/*/src` or `packages/*/src` importing `evals` — fixtures, datasets, and harness code are not in any image. Runtime evaluation logic belongs in `packages/evaluation` ([ADR-016](../context/architecture.md#adr-016--the-evaluation-runtime-is-a-package-evals-is-offline-tooling))
 - `packages/*` importing from `apps/*`
-- `apps/api` importing `apps/worker` internals, or the reverse
-- `packages/domain` importing SQLAlchemy, FastAPI, or the Anthropic SDK — the domain layer has no I/O and no framework
+- `packages/domain` importing any other project package
+- `packages/evaluation` importing anything from this project except `domain` and `db`
+- `apps/inference` importing anything from this project except `observability`
+- `apps/api` importing `apps/worker`, or the reverse. **One declared exception:** `api.services.ingest` imports `worker.tasks.ingest` to run ingestion inline when Celery cannot accept the task.
+
+**Forbidden by review only:** `packages/domain` importing SQLAlchemy, FastAPI, or the Anthropic SDK — the domain layer has no I/O and no framework. No import-linter contract covers third-party packages.
 
 ## 5. Python Style
 
@@ -89,7 +93,7 @@ evals/               → offline tooling; may import packages and apps/worker pi
 - `ruff format` output is the only acceptable formatting. No manual alignment.
 - Line length 100.
 - Full type hints on every function signature, including `-> None`.
-- `from __future__ import annotations` at the top of every module.
+- `from __future__ import annotations` at the top of every module. (`domain/temporal.py` and `retrieval/temporal.py` do not yet follow this.)
 
 ### 5.2 Rules with teeth
 
@@ -102,7 +106,7 @@ evals/               → offline tooling; may import packages and apps/worker pi
 | **`Protocol` for interfaces**, not ABCs, unless shared implementation is genuinely needed | Structural typing keeps `packages/domain` free of framework coupling |
 | **No module-level side effects** — no I/O, no client construction, no `os.environ` reads at import time | Import-time side effects break testing and cold starts |
 | **`datetime.now(tz=UTC)`**, never naive datetimes | Timezone bugs in `effective_from` / `effective_to` are correctness bugs, not cosmetic |
-| **`Decimal` for money**, never `float` | The cost ledger must add up |
+| **`Decimal` for money**, never `float` | The cost ledger must add up. Known deviation: model prices are `float` constants in `packages/llm/src/llm/models.py` (R-125) |
 
 ### 5.3 Naming
 
@@ -117,7 +121,7 @@ evals/               → offline tooling; may import packages and apps/worker pi
 
 ### 5.4 Errors
 
-Domain code raises **typed domain exceptions** from `packages/domain/errors.py`. Only the HTTP boundary translates them to responses.
+Domain code raises **typed domain exceptions** from `packages/domain/src/domain/errors.py`. Only the HTTP boundary translates them to responses.
 
 ```text
 DomainError
@@ -140,7 +144,7 @@ A FastAPI exception handler maps each to an RFC 7807 response per [api_rules.md 
 - Server Components by default; `"use client"` only where interactivity requires it.
 - Data fetching in server components or route handlers, never `useEffect` fetch waterfalls.
 - Types for API payloads are **generated from the committed OpenAPI schema**, not hand-written. A drift between them is a CI failure.
-- Components: one per file, `PascalCase` filename matching the export.
+- Components: one per file, `PascalCase` filename matching the export. The existing `src/components/auth-gate.tsx` predates this rule.
 - Styling: Tailwind utility classes, no ad-hoc CSS files. **There is no component library** — every control is hand-rolled. shadcn/ui was named in early drafts and never adopted; do not cite it as present.
 - Every interactive element is keyboard-reachable and has an accessible name.
 - Both light and dark themes are supported — `prefers-color-scheme` plus an explicit toggle.
@@ -167,7 +171,7 @@ A FastAPI exception handler maps each to an RFC 7807 response per [api_rules.md 
 | Foreign keys | `<singular>_id`, always with an explicit `ON DELETE` action |
 | Timestamps | `created_at`, `updated_at`, both `timestamptz NOT NULL DEFAULT now()` |
 | Soft delete | Not used. Use status columns or the version chain. |
-| Tenant column | **Every tenant-scoped table has `tenant_id uuid NOT NULL`** — no exceptions, checked by a test |
+| Tenant column | **Every tenant-scoped table has `tenant_id uuid NOT NULL`** — no exceptions. Review enforces this; the schema test is not yet implemented |
 | RLS | Enabled on every tenant-scoped table, with a policy on `current_setting('app.current_tenant')` |
 | Enums | Postgres native enums for closed sets that rarely change; `text` + `CHECK` where values evolve |
 | JSON | `jsonb`, never `json`; only for genuinely schemaless data (`settings`, `metrics`, `params`) |
@@ -183,7 +187,7 @@ A FastAPI exception handler maps each to an RFC 7807 response per [api_rules.md 
 - **`0001_initial` is not immutable in practice.** It builds the schema with `Base.metadata.create_all()`, so it re-derives from *current* model metadata on every run. Adding an `Index` to a model's `__table_args__` therefore changes what an already-released migration creates, and a fresh database ends up with objects an existing one lacks. Until 0001 is rewritten as explicit DDL, guard model-derived DDL in later migrations with `IF NOT EXISTS`. This caused a CI failure (R-058).
 - **Expand/contract for anything breaking.** Add the new column → deploy code that writes both → backfill → deploy code that reads the new → drop the old. No deploy may require a simultaneous schema and code cutover.
 - Data migrations that touch many rows are batched and idempotent.
-- Adding a tenant-scoped table without RLS fails the migration test.
+- Adding a tenant-scoped table without RLS must fail a migration test. **Not yet implemented:** `packages/db/tests/test_rls.py` covers cross-tenant reads and writes, not RLS presence on every table.
 
 ## 8. Configuration & Secrets
 
@@ -206,7 +210,7 @@ A FastAPI exception handler maps each to an RFC 7807 response per [api_rules.md 
 - Tokens, API keys, JWTs, or any credential
 - Full email addresses (log the user ID)
 
-A test in the security suite asserts these do not appear in captured log output.
+A security-suite test that asserts these do not appear in captured log output is required but not yet implemented ([testing.md § 6.4](./testing.md#64-log-hygiene)).
 
 ## 10. Git
 
@@ -223,19 +227,19 @@ Conventional Commits. Subject ≤ 50 characters, imperative mood, no trailing pe
 ```text
 feat(retrieval): fuse dense and lexical arms with RRF
 
-Single SQL statement with both arms as CTEs so fusion costs one
-round trip instead of two. k=60 per the literature default; exposed
+Rank-based fusion needs no score normalization between cosine
+distance and ts_rank_cd. k=60 per the literature default; exposed
 as a tunable for the strategy comparison.
 ```
 
 Types: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `chore`, `build`, `ci`.
-Scopes: `api`, `worker`, `inference`, `web`, `db`, `retrieval`, `llm`, `evals`, `infra`, `docs`.
+Scopes: `api`, `worker`, `inference`, `web`, `domain`, `db`, `retrieval`, `llm`, `observability`, `evaluation`, `evals`, `infra`, `docs`.
 
 Body only when the *why* is not obvious from the subject. Explain the reasoning, not the diff — the diff is already in the commit.
 
 ### 10.3 Pull requests
 
-Template requires:
+No pull-request template is committed; every PR description includes:
 
 - Link to the task file in `docs/tasks/`
 - What changed and why

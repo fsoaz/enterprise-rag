@@ -200,6 +200,25 @@ Hosted CI and live-model quality remain separate, unmeasured evidence. Worker re
 classification, durable publication recovery, and the other supplied deferred areas
 are outside this cleanup.
 
+### Documentation accuracy audit — 2026-09-27
+
+[T-412](../tasks/T-412-documentation-accuracy-audit.md) corrected the developer
+documentation. The code and design findings below were found during the audit
+and are outside a documentation change.
+
+| ID | Date | Source | Severity | Location | Finding | Status | Resolution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| R-125 | 2026-09-27 | documentation audit | `medium` | `packages/llm/src/llm/models.py`, `packages/db/src/db/models.py` (`ModelPrice`) | Model prices are `float` constants recorded as `price_table_version = "v0"`; the `model_prices` table is never read. Contradicts the `Decimal`-for-money convention and the versioned-price design ([architecture § 12.1](../context/architecture.md#121-cost-ledger)). | open | Documented as a known deviation in conventions, ai_agent_rules, and architecture. |
+| R-126 | 2026-09-27 | documentation audit | `low` | `packages/llm/src/llm/client.py` (`SYSTEM_PROMPT`) | The `cache_control` breakpoint sits on a system prompt that is far shorter than the documented minimum cacheable prefix and has no tenant policy block, so prompt caching is not expected to produce cache reads. [VERIFY] Confirm with `usage.cache_read_input_tokens` against the live API. | open | Documented in architecture § 8.4 and ai_agent_rules B7. |
+| R-127 | 2026-09-27 | documentation audit | `medium` | `apps/api/src/api/deps/auth.py`, `apps/worker/src/worker/tasks/ingest.py`, `apps/worker/src/worker/tasks/eval.py`, `infra/compose/docker-compose.yml` | The `BYPASSRLS` migration identity is used at runtime by the API (OIDC subject lookup) and the worker (job and eval-run tenant resolution), and Compose gives both services `DATABASE_URL_MIGRATE`. Each use reads one identifying row before a tenant is known, but the running processes hold a DDL-capable, RLS-exempt credential, contrary to the role design that reserved it for Alembic (R-002). | open | Current behavior documented in [architecture § 4.2](../context/architecture.md#42-layer-2--postgres-row-level-security). A least-privilege lookup identity is a design task. |
+| R-128 | 2026-09-27 | documentation audit | `low` | `openapi.json` (`DELETE /api/v1/documents/{document_id}`) | The generated schema lists only 200 and 422, but the route always returns 405 with a problem body. Clients generated from the schema do not see the real response. | open | Declare the 405 response on the route and regenerate. |
+| R-129 | 2026-09-27 | documentation audit | `low` | `apps/api/src/api/routers/search.py` (`SearchRequest`), `apps/api/src/api/routers/chat.py` (`ChatRequest`) | Unknown request fields are ignored, so a client sending the formerly documented `collection_ids` filter gets unfiltered results with no error. | open | Documentation corrected; consider rejecting unknown fields. |
+| R-130 | 2026-09-27 | documentation audit | `medium` | `scripts/run-integration-tests.sh:17,24,32` | The script calls Compose without `--env-file .env` and exports `INFERENCE_BACKEND=stub` before `up`, which recreates the shared development `inference` container with the stub backend. A running development stack then serves stub embeddings until `make up` is re-run. | open | Troubleshooting entry added to the local-development guide. |
+| R-131 | 2026-09-27 | documentation audit | `low` | `apps/**/tests`, `packages/**/tests` | 14 of 151 Python test functions follow the documented `test_<unit>__<condition>__<expected>` naming. | open | Rule kept for new tests; testing.md notes the legacy naming. No renames in unrelated changes. |
+| R-132 | 2026-09-27 | documentation audit | `info` | `docs/context/roadmap.md`, `docs/context/product.md` | Milestone assignments disagree: the roadmap states every differentiator ships in Milestone A while product assigns freshness detection and the eval dashboard to B; version history is listed in Phase 6a and 6b; Milestone A exit criteria require the `cloud-gpu` profile, whose infrastructure is Milestone B. | open | Product decision; reported, not resolved, by T-412. |
+| R-133 | 2026-09-27 | documentation audit | `low` | `Makefile` (`install`) | `make install` runs `npm install`, while the documentation and CI use `npm ci` against the lockfile, so the target can modify `apps/web/package-lock.json`. | open | Not documented as a setup step. |
+| R-134 | 2026-09-27 | documentation audit | `info` | `apps/api/src/api/services/chat.py:374` | `queries.prompt_hash` is a SHA-256 of the question, not of the assembled prompt, so it cannot distinguish prompt-template changes as the audit requirement in product § 9 implies. | open | Documented in architecture § 12.3. |
+
 <!--
 Row format:
 | R-001 | 2026-08-03 | self | high | packages/retrieval/fusion.py:52 | RRF applied after the ACL filter instead of inside the CTE | scheduled | T-211 |

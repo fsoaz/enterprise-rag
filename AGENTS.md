@@ -2,9 +2,9 @@
 
 ## Project Structure & Module Organization
 
-`apps/` contains deployables: FastAPI `api`, Celery `worker`, model-serving `inference`, and Next.js `web`. Python code lives in each component’s `src/`; shared libraries live in `packages/{domain,db,retrieval,llm,observability}`. Libraries must not import apps; apps must not import each other’s internals.
+`apps/` contains deployables: FastAPI `api`, Celery `worker`, model-serving `inference`, and Next.js `web`. Python code lives in each component’s `src/`; shared libraries live in `packages/{domain,db,retrieval,llm,observability,evaluation}`. `.importlinter` enforces the boundaries (`make typecheck`): libraries never import apps; `domain` imports no other project package; `evaluation` imports only `domain` and `db`; `inference` imports only `observability`; `api` and `worker` do not import each other, except the declared `api.services.ingest -> worker.tasks.ingest` inline-ingest fallback; no product code imports `evals`.
 
-Python tests live in component `tests/` directories and root `tests/`. Frontend tests sit beside source files; static assets live in `apps/web/public/`. `evals/` holds synthetic fixtures, datasets, and the evaluation harness. Alembic revisions live in `packages/db/migrations/`; local infrastructure lives in `infra/compose/`. Consult `docs/context/` and `docs/standards/` for design and engineering rules.
+Python tests live in component `tests/` directories, root `tests/`, and beside the harness in `evals/harness/`. Frontend tests sit beside source files; static assets live in `apps/web/public/`. `evals/` holds synthetic fixtures, datasets, and the evaluation harness. Alembic revisions live in `packages/db/migrations/`; local infrastructure lives in `infra/compose/`. Consult `docs/context/` and `docs/standards/` for design and engineering rules.
 
 ## Build, Test, and Development Commands
 
@@ -20,6 +20,7 @@ Use Python 3.12, Node 22, and `uv`. Run these from the repository root:
 - `make test`: run non-integration pytest tests.
 - `make test-integration`: test against a disposable database.
 - `make migrate-check`: validate migration upgrade/downgrade against an empty database.
+- `make migrate` / `make seed`: migrate or seed the development database; `make db-reset` drops, rebuilds, and re-seeds it (destroys local data).
 - `npm run test:coverage --prefix apps/web`: run frontend tests with coverage.
 
 ## Coding Style & Naming Conventions

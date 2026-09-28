@@ -2,11 +2,11 @@
 
 **Enterprise RAG Document Intelligence System** — turn a static document repository into an interactive, cited knowledge layer with permission-aware retrieval.
 
-> **Status: Milestone A complete, after a security pass and a full QA remediation round.** Real OIDC sign-in, real BGE-M3 and BGE-reranker-v2-m3 weights, multi-turn chat, a PT/EN interface, keyset pagination, and a frontend test tier. CI and the integration-test helper select the deterministic inference backend for reproducible checks. Set `ANTHROPIC_API_KEY` for synthesized answers; without one the system abstains rather than guessing.
+> **Status: Milestone A in progress** — live status in [current_task.md](docs/execution/current_task.md). Implemented: real OIDC sign-in, real BGE-M3 and BGE-reranker-v2-m3 weights, multi-turn chat, a PT/EN interface, keyset pagination, a tenant-scoped evaluation API with a deterministic CI gate, and a frontend test tier. CI and the integration-test helper select the deterministic inference backend for reproducible checks. Set `ANTHROPIC_API_KEY` for synthesized answers; without one the system abstains rather than guessing.
 >
-> Those rounds closed the defects in [review_notes.md](docs/execution/review_notes.md) — an abstention gate structurally stuck on under the default strategy, ingest failures that were never recorded, a prompt-injection score nothing read, and a frontend with no configuration that was both functional and safe. See [work_log.md](docs/execution/work_log.md).
+> A security pass and QA remediation rounds closed the defects recorded in [review_notes.md](docs/execution/review_notes.md); see [work_log.md](docs/execution/work_log.md).
 >
-> **Not yet measured:** answer quality, latency and cost against the live Anthropic API, which needs production credentials. The deterministic stub-backed eval gate is now wired for pull requests and scheduled full runs; the first hosted smoke result is still pending before [R-031](docs/execution/review_notes.md) can close.
+> **Not yet measured:** answer quality, latency and cost against the live Anthropic API, which needs production credentials. The deterministic stub-backed eval gate runs on pull requests, pushes to `main`, and a nightly full run; the first hosted smoke result is still pending before [R-031](docs/execution/review_notes.md) can close.
 
 ---
 
@@ -24,7 +24,7 @@ This system answers questions in Portuguese or English, grounded in an organizat
 | Search | PostgreSQL 16 + pgvector (HNSW) + Postgres FTS (`portuguese` / `english`), fused with RRF |
 | Embeddings | BGE-M3, self-hosted — 1024-dim, multilingual |
 | Reranking | BGE-reranker-v2-m3, self-hosted cross-encoder |
-| Generation | Anthropic Claude — `claude-opus-5` primary, `claude-haiku-4-5` for judging |
+| Generation | Anthropic Claude — `claude-opus-5` primary, `claude-haiku-4-5` for judging; `claude-sonnet-5` is registered as a fallback but not yet called |
 | Jobs / cache | Celery + Redis |
 | Storage | MinIO (dev) / S3 (cloud) |
 | Frontend | Next.js (App Router) · TypeScript · Tailwind CSS · no component library |
@@ -41,7 +41,7 @@ No orchestration framework, no managed vector database. Both are deliberate — 
 | **Native citations** | Character-level spans returned by the API, not `[1]`/`[2]` markers the model could invent — and the UI links each answer sentence to the span that supports it. |
 | **Unsupported-answer detection** | With a live model: citation coverage + an entailment judge + retrieval confidence, the last normalized per strategy so one threshold is meaningful across all four. Without one, the degraded path has no judge and no synthesis, so it abstains unless full-text search finds real evidence — never `grounded`. See [ADR-012](docs/context/architecture.md#adr-012--degraded-mode-evidence-is-lexical-or-it-does-not-exist). |
 | **Enforced injection defense** | Multilingual injection patterns are scored at ingest and acted on in SQL on both retrieval arms. Structural chat-template markers are filtered out entirely; linguistic patterns — override, jailbreak, exfiltration — stay retrievable and reach the model labelled `[UNTRUSTED]`, so a security policy that quotes the vocabulary is still answerable. The eval report measures exclusion rate; this is defense in depth, not a claim of universal jailbreak immunity. |
-| **Evaluation harness** | Eight-slice bilingual golden set for local, reproducible measurement. CI/eval dashboard integration is not implemented. |
+| **Evaluation harness** | Eight-slice bilingual golden set, a tenant-scoped evaluation API, and a deterministic CI regression gate. An evaluation dashboard is not implemented. |
 | **Retrieval-strategy comparison** | The harness can compare strategies; results from stub embeddings must not be treated as semantic-quality claims. |
 | **Tokens never reach the browser** | The Next.js server runs the OIDC exchange and proxies every API call with the bearer header attached. An XSS in the UI cannot exfiltrate a credential, because there is none in the page. See [ADR-013](docs/context/architecture.md#adr-013--the-browser-never-holds-a-token). |
 | **Freshness detection** | Chunks belong to document *versions*. Uploading a replacement through `POST /documents/{id}/versions` supersedes the current version rather than creating a second document, so old citations stay resolvable and each citation carries a computed freshness badge. |
@@ -64,10 +64,15 @@ Full diagram and component contracts: [architecture.md § 3](docs/context/archit
 
 ### Prerequisites
 
-- Python **3.12** (`>=3.12,<3.13`), uv, GNU Make, and Bash.
-- Docker Engine and Docker Compose v2 with support for the checked-in Compose file.
+- Python **3.12** (`>=3.12,<3.13`), GNU Make, and Bash.
+- uv with `uv run --env-file` support. [VERIFY] No minimum version is pinned for
+  host use; the container images use uv 0.6.14.
+- Docker Engine and Docker Compose **v2.24.0 or later** (the Compose file uses
+  optional `env_file` entries).
 - Node **22** and npm for local frontend development and contribution checks.
 - curl for readiness checks; network access for dependencies, images, and model weights.
+- Free host ports 3000, 8000, 8001, 8080, 15432, 16379, 19000, and 19001
+  ([port reference](docs/guides/local-development.md#ports)).
 
 Postgres 16 with pgvector, Redis, MinIO, and Keycloak run in Compose. Real BGE
 models run on CPU by default. First startup includes image builds and model
@@ -110,34 +115,27 @@ curl --fail --silent --show-error http://localhost:8000/health
 curl --fail --silent --show-error http://localhost:8000/ready
 ```
 
-Expect inference readiness, API liveness, and API readiness respectively. The API
-readiness response includes database, Redis, and inference checks; HTTP 503 means
-at least one failed. It does not verify the worker or an upload. Sign in as
-explained below, then [verify a first upload](docs/guides/local-development.md#verify-an-upload).
+Expect inference readiness, API liveness, and API readiness respectively; HTTP 503
+from API readiness means a database, Redis, or inference check failed. The
+[startup checks](docs/guides/local-development.md#verify-startup) also cover
+Keycloak and the web server.
+
+Open `http://localhost:3000`, choose **Sign in**, and use `acme-steward` /
+`acme-steward`. Every seeded identity's password equals its username; the
+[identity table](docs/guides/local-development.md#development-sign-in) lists the
+Acme and Globex users, their roles, and what they can see. Access and refresh
+tokens remain in HttpOnly cookies; the Next.js server refreshes and forwards them
+to FastAPI. Then [verify a first upload](docs/guides/local-development.md#verify-an-upload).
 For failures, use the [troubleshooting guide](docs/guides/local-development.md#troubleshooting).
 
 Stop the stack with `make down`; Compose data volumes are retained.
 
-### Dev auth and network exposure
+### Network exposure
 
-The default path is real OIDC Authorization Code + PKCE against the imported
-`enterprise-rag` Keycloak realm. Open `http://localhost:3000`, choose **Sign in**,
-and use a seeded identity such as `acme-member` / `acme-member` or
-`acme-steward` / `acme-steward`. Access and refresh tokens remain in HttpOnly
-cookies; the Next.js server refreshes and forwards them to FastAPI.
-
-The realm and database seed share stable tenant UUIDs. If the database predates
-this auth setup, `make db-reset` rebuilds its seeded identities to match the realm.
-This deletes all development database data; use it only for a disposable database.
-
-To use header-based impersonation instead, set `DEV_AUTH_BYPASS=true` in `.env`
-and `CORS_ALLOW_ORIGINS=http://localhost:3000` in `.env`, plus
-`NEXT_PUBLIC_DEV_AUTH=true` in `apps/web/.env.local`. Use the separate-process
-workflow and restart API and web. In this mode the browser calls FastAPI directly
-and sends `X-Dev-User`. Compose forces bypass off.
-
-> **`DEV_AUTH_BYPASS=true` trusts that header with no verification — any caller can
-> become any user, in any tenant.** Use it only on a development machine.
+Header-based impersonation (`DEV_AUTH_BYPASS=true`) lets any caller become any
+user in any tenant; Compose forces it off, and the
+[local-development guide](docs/guides/local-development.md#header-based-impersonation-bypass)
+explains the development-only setup.
 
 The Compose stack uses development credentials throughout (default
 Postgres/MinIO/Keycloak passwords and no Redis auth), so **every published port
@@ -154,10 +152,6 @@ Per-user request caps and a rolling 24-hour spend ceiling are enforced by defaul
 see `RATE_LIMIT_*` and `TENANT_DAILY_BUDGET_USD` in `.env.example`. Rate limiting
 fails **open** when Redis is unreachable (a cache outage should not be a full
 outage); the budget guard reads `cost_ledger` in Postgres, so it holds regardless.
-
-Seeded roles drive authorization: `acme-admin` (admin — manages ACL entries),
-`acme-steward` (`steward` role — uploads and archives documents), `acme-member` and
-`acme-viewer` (read-only, and they see different documents by ACL).
 
 ## Documentation
 
@@ -193,6 +187,7 @@ API also serves interactive documentation at `http://localhost:8000/api/docs`.
 | [review_notes.md](docs/execution/review_notes.md) | Review findings register and the standing review checklist |
 | [test_evidence.md](docs/execution/test_evidence.md) | What was run, what it showed, and the quality/security snapshot tables |
 | [qa_report_2026-07-26.md](docs/execution/qa_report_2026-07-26.md) | Full QA review of Milestone A — 37 findings and their disposition |
+| [qa_report_2026-07-29.md](docs/execution/qa_report_2026-07-29.md) · [qa_report_2026-07-31.md](docs/execution/qa_report_2026-07-31.md) | Follow-up QA reviews |
 | [tasks/](docs/tasks/README.md) | Task numbering, lifecycle, and the task spec template |
 
 ## Contributing
@@ -211,7 +206,7 @@ make lint typecheck        # ruff · biome · mypy · import-linter · tsc
 make test                  # pytest, unit tier
 make test-integration      # creates, migrates, seeds, tests, and drops a disposable database
 make migrate-check         # runs the migration chain from an EMPTY database, as CI does
-npm test --prefix apps/web # vitest — components and browser-side modules
+npm run test:coverage --prefix apps/web  # vitest with the CI coverage thresholds
 ```
 
 `make test-integration` will not touch the development database: the target name must end
@@ -236,18 +231,16 @@ published as semantic quality. Compose and the documented local command default 
 or weights are unavailable. Current figures and their caveats:
 [test_evidence.md](docs/execution/test_evidence.md).
 
-See [current_task.md](docs/execution/current_task.md).
+## Configuration
+
+[.env.example](.env.example) documents the supported environment variables. LLM
+model identities are selected in `packages/llm/src/llm/models.py`, not through the
+environment; evaluation runs record their requested generator identity. Server
+binding comes from the `uvicorn --host ... --port ...` startup command (the API
+image uses `0.0.0.0:8000`). Embedding and inference model selection, and which
+settings reach each Compose service, are described in
+[configuration loading](docs/guides/local-development.md#configuration-loading).
 
 ## Licence
 
 See [LICENSE](LICENSE).
-
-### Runtime configuration
-
-LLM model identities are selected through `packages/llm/src/llm/models.py`;
-evaluation runs record their requested generator identity. Server binding comes
-from the `uvicorn --host ... --port ...` startup command (the API image uses
-`0.0.0.0:8000`). Embeddings have a fixed 1024-dimensional database/inference
-contract. `EMBEDDING_MODEL` and `RERANK_MODEL` configure the inference backend;
-`EMBEDDING_MODEL_NAME` selects the stored embedding generation used by retrieval.
-See `.env.example` for supported environment configuration.

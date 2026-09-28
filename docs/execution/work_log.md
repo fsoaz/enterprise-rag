@@ -4,6 +4,41 @@
 > One entry per completed task. Never edit or delete a past entry; correct it with a new one that says what changed.
 > **Related:** [current_task.md](./current_task.md) · [test_evidence.md](./test_evidence.md) · [review_notes.md](./review_notes.md)
 
+## 2026-09-27 — T-412 documentation accuracy audit
+
+User-requested AUDIT → EDIT of the developer documentation against the Makefile,
+Compose file, workflows, `.importlinter`, `openapi.json`, and source. Verdict before
+editing: **needs revision**. Setup commands, ports, seeded identities, and anchors
+were already correct. The material defects were:
+
+- Status lines contradicted `current_task.md`.
+- `architecture.md` described roughly forty designed mechanisms as current.
+- `api_rules.md` documented the wrong validation status (400 instead of 422), routes
+  and fields that do not exist, and rate-limit headers as planned when they exist.
+- `testing.md` said frontend coverage was not gated.
+- The local-development evaluation commands could not run as written (no `.env`
+  loading; Compose cannot serve header-authenticated requests).
+
+Changes:
+
+- `architecture.md` sections 3–14 now carry Implemented / Partial / Proposed labels,
+  with corrections; ADRs gained dated correction notes instead of rewrites.
+- `api_rules.md` § 12 marks every implemented route.
+- The local-development guide is now the canonical home for ports, sign-in
+  identities, bypass setup, reset/cleanup, the disposable-database evaluation
+  procedure, and new troubleshooting entries. The README keeps orientation and links
+  to it.
+- AGENTS.md and `conventions.md` state the import-linter contracts as enforced,
+  including `packages/evaluation` and the api→worker exception.
+- `.env.example` documents `BIND_ADDR` and `MAX_UPLOAD_BYTES`.
+- Ten code and design findings were logged as R-125–R-134, including runtime use of
+  the `BYPASSRLS` role (R-127) and the integration script swapping the shared
+  inference container to the stub (R-130).
+
+Evidence: [E-017](./test_evidence.md). [VERIFY] Compose startup, sign-in, the upload
+walkthrough, and the new evaluation procedure were not executed; `uv` and Docker
+were unavailable.
+
 ## 2026-09-11 — T-411 bounded complexity cleanup
 
 Committed the existing T-410 extraction separately as `b6e68c1`, then implemented
