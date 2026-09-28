@@ -21,7 +21,7 @@ npm run dev --prefix apps/web
 ```
 
 Keep an existing `.env.local` if already configured. Open `http://localhost:3000`
-and use the [seeded sign-in identities](../../README.md#dev-auth-and-network-exposure).
+and use the [seeded sign-in identities](../../docs/guides/local-development.md#development-sign-in).
 The [first-upload walkthrough](../../docs/guides/local-development.md#verify-an-upload)
 checks the backend and worker as well as the page.
 
@@ -35,7 +35,7 @@ bundles when changing public values.
 
 Use `localhost` consistently with the seeded issuer and callback configuration.
 For optional header-based impersonation and its required API/CORS settings, see
-[development authentication](../../README.md#dev-auth-and-network-exposure).
+[development authentication](../../docs/guides/local-development.md#header-based-impersonation-bypass).
 The full Compose workflow sets web configuration through its build arguments and
 service environment, rather than this local file.
 

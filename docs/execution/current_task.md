@@ -9,12 +9,15 @@
 
 | Field | Value |
 | --- | --- |
-| Task | T-411 — Bound evaluation complexity after T-410 |
-| File | [T-411-bounded-complexity-cleanup.md](../tasks/T-411-bounded-complexity-cleanup.md) |
-| Status | done — local implementation and verification complete ([E-016](./test_evidence.md)); hosted CI remains pending |
-| Branch | refactor/T-411-bounded-complexity-cleanup |
-| Started | 2026-09-11 |
-| Base | T-410 (`b6e68c1`, committed separately) |
+| Task | T-412 — Correct developer documentation against the implementation |
+| File | [T-412-documentation-accuracy-audit.md](../tasks/T-412-documentation-accuracy-audit.md) |
+| Status | done — local edits and verification complete ([E-017](./test_evidence.md)); not yet committed |
+| Branch | docs/T-412-documentation-accuracy-audit |
+| Started | 2026-09-27 |
+| Base | T-411 (`78c5ead`) |
+
+T-411 — Bound evaluation complexity after T-410 — is done locally
+([E-016](./test_evidence.md)); hosted CI remains pending.
 
 T-410 resolves R-124 before the T-405→T-408 stack merges into `main`, which is the
 baseline and does not contain the coupling.

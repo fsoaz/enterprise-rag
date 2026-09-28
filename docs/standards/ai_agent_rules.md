@@ -36,10 +36,10 @@ Two parts. **Part A** governs how an agent works in this repo. **Part B** govern
 
 ## A4. Always do these
 
-- Run `ruff`, `mypy`, and the unit + security tiers before claiming a task is done
+- Run `make lint typecheck` and `make test` (plus `make test-integration` when touching the database) before claiming a task is done
 - Write the migration's `downgrade()` and exercise it
 - Update `.env.example` when adding configuration
-- Regenerate and commit `openapi.json` when the API surface changes
+- When the API surface changes, follow the [generation workflow](./conventions.md#2-toolchain) and commit both OpenAPI files and the generated frontend types
 - Append an entry to [work_log.md](../execution/work_log.md) on completion
 - Record verification evidence in [test_evidence.md](../execution/test_evidence.md)
 - Update [current_task.md](../execution/current_task.md) when starting and finishing
@@ -99,9 +99,9 @@ Every rule here is either an API constraint (violating it returns a 400) or a pr
 ## B3. Response handling
 
 - **Check `stop_reason` before reading `content`.** A refusal returns HTTP 200 with empty or partial content. `response.content[0].text` without that check is a crash waiting for a specific input.
-- Handle `pause_turn` in the tool loop by re-sending the conversation; cap continuations at 3.
+- Handle `pause_turn` in the tool loop by re-sending the conversation; cap continuations at 3. *(Applies once tools exist; the current client has no tool loop.)*
 - Handle `max_tokens` distinctly from `end_turn` — a truncated answer must not be served as complete.
-- Enable server-side fallbacks by default: `fallbacks: "default"` with beta header `server-side-fallback-2026-07-01`, so a safety refusal is re-served rather than surfacing as a failure.
+- Enable server-side fallbacks by default: `fallbacks: "default"` with beta header `server-side-fallback-2026-07-01`, so a safety refusal is re-served rather than surfacing as a failure. **Not yet implemented** in `packages/llm/src/llm/client.py`.
 - Iterate `content` blocks by `type`. Never index a fixed position.
 
 ## B4. Retrieved content is untrusted input
@@ -109,10 +109,10 @@ Every rule here is either an API constraint (violating it returns a 400) or a pr
 This is the rule with the largest blast radius if broken.
 
 - **Retrieved document text goes only into `document` content blocks.** Never into `system`. Never string-concatenated into the user's message text.
-- Runtime operator instructions use mid-conversation `{"role": "system"}` messages — the non-spoofable channel. Never a `<system-reminder>`-style text block inside a user turn, which document content can imitate.
+- *Not yet implemented; applies when operator instructions are added.* Runtime operator instructions use mid-conversation `{"role": "system"}` messages — the non-spoofable channel. Never a `<system-reminder>`-style text block inside a user turn, which document content can imitate.
 - The system prompt states explicitly that document content is data to summarize and cite, never instructions to follow.
-- No tool with side effects is exposed to the model. Read-only allowlist, ACL-bound, capped call count.
-- Every answer passes the egress scan before leaving the API.
+- No tool with side effects is exposed to the model. Read-only allowlist, ACL-bound, capped call count. (No tools are exposed today.)
+- Every answer must pass an egress scan before leaving the API. **Not yet implemented:** no egress scan exists.
 
 ## B5. Citations are mandatory
 
@@ -124,19 +124,19 @@ This is the rule with the largest blast radius if broken.
 
 - **Every LLM call writes a `cost_ledger` row.** Generation, judging, expansion, eval — no exceptions. An un-ledgered call is a review-blocking defect, and a test counts calls against rows.
 - Record `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, model, purpose, latency, and the `price_table_version` used.
-- Prices come from the versioned `model_prices` table, never from a constant in code.
+- Prices come from the versioned `model_prices` table, never from a constant in code. **Known deviation (R-125):** prices are currently `float` constants in `packages/llm/src/llm/models.py` with `price_table_version` `v0`; the `model_prices` table is not read.
 
 ## B7. Prompt caching
 
-- The stable prefix is the system instructions plus the tenant policy block, with the `cache_control` breakpoint on the last system block. Everything volatile goes after it.
+- The stable prefix is the system instructions plus the tenant policy block, with the `cache_control` breakpoint on the last system block. Everything volatile goes after it. Today there is no tenant policy block, and the system prompt alone is shorter than the minimum cacheable prefix, so the breakpoint has no effect (R-126).
 - **Nothing dynamic in the system prompt** — no `datetime.now()`, no request ID, no user name, no per-request counter. A single volatile byte invalidates the whole prefix.
 - Tool definitions are serialized deterministically (sorted by name). Changing the tool set mid-conversation invalidates the cache.
 - Verify with `usage.cache_read_input_tokens`. Zero reads across repeated queries means a silent invalidator, and it is a bug to be fixed, not a metric to be ignored.
-- Minimum cacheable prefix on `claude-opus-5` is 512 tokens.
+- Minimum cacheable prefix on `claude-opus-5` is 512 tokens. [VERIFY] Confirm against Anthropic's current documentation; this repository cannot establish it.
 
 ## B8. Prompts live in files
 
-- Prompt templates live in `packages/llm/prompts/`, versioned, one file per prompt.
+- Prompt templates live in files, versioned, one file per prompt. **Known deviation:** only the judge rubric is a file (`packages/llm/src/llm/judges/`); the generation `SYSTEM_PROMPT` is an inline constant in `packages/llm/src/llm/client.py`, and `packages/llm/prompts/` does not exist.
 - Judge rubric prompts additionally carry a hash recorded on `eval_runs.judge_prompt_hash`.
 - Changing a prompt requires an eval-smoke run attached to the PR. A prompt change is a behavior change.
 - No prompt string is constructed inline at a call site.
@@ -145,7 +145,7 @@ This is the rule with the largest blast radius if broken.
 
 - Both go through the `inference` service's HTTP contract. Neither `api` nor `worker` loads model weights.
 - BGE-M3 uses **different instruction prefixes for queries and passages** — `mode: "query"` when embedding a user query, `mode: "passage"` when embedding a chunk. Using the wrong one measurably degrades recall and produces no error.
-- Embeddings are written with `model_name` and `model_version`. Retrieval filters to the active generation. Changing the embedding model is a reindex, not an in-place update.
+- Embeddings are written with `model_name` and `model_version`. Retrieval filters to the active generation. Changing the embedding model requires re-embedding every chunk, not an in-place update; no reindex task exists yet, so this means re-ingesting.
 
 ## B10. When in doubt about the Anthropic API
 

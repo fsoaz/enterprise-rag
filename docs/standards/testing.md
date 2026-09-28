@@ -22,6 +22,9 @@ A RAG system fails quietly. Retrieval gets slightly worse, an ACL filter is drop
 | **Load** | k6 against staging | ~15 min | Pre-release |
 
 The table describes the target test strategy, including tiers not yet automated.
+Throughout this standard, requirements the repository does not yet implement are
+marked **Not yet implemented**; unmarked rules describe tests or infrastructure
+that exist today or rules every new test must follow.
 The current CI jobs run independently, without sequential `needs` dependencies.
 See [§ 12](#12-ci-pipeline) for implemented jobs and remaining gaps.
 
@@ -49,7 +52,7 @@ Coverage is a floor, not a goal. A 95% number with no test for "user B cannot se
 - No `sleep`. No real clock — inject a time provider.
 - No network, no filesystem outside `tmp_path`, no database.
 - Parametrize aggressively; one assertion concept per test.
-- Naming: `test_<unit>__<condition>__<expected>` — e.g. `test_acl_predicate__document_deny_overrides_collection_allow__excludes_document`.
+- Naming: `test_<unit>__<condition>__<expected>` — e.g. `test_acl_predicate__document_deny_overrides_collection_allow__excludes_document`. Most existing Python tests predate this rule and use single underscores; apply it to new tests without renaming old ones in unrelated changes.
 
 **High-value unit targets:** RRF fusion math, ACL resolution order, chunk boundary logic, citation span mapping, groundedness verdict thresholds, cost computation from usage, staleness scoring, retry/backoff policy.
 
@@ -79,17 +82,17 @@ Rules for this tier:
   nothing for a test to add there; what a test can show is that switching locale updates
   the rendered strings *and* `document.documentElement.lang`.
 
-The nine tests currently cover: the sign-in and signed-in states of `AuthGate`; SSE frame
-splitting and malformed-frame recovery; the locale switch; the admin document list,
-ingestion history and archive-without-reload; and on the chat page, that the `verifying`
-stage is shown before any answer text is released, that citation anchors are unique and
-sequential with invalid sentence bindings dropped, and that a follow-up turn sends bounded
-conversation messages.
+The tests cover: the sign-in and signed-in states of `AuthGate`; SSE frame splitting and
+malformed-frame recovery; the locale switch; the admin document list, ingestion history
+and archive-without-reload; the auth callback, logout, and backend proxy route handlers;
+and on the chat page, that the `verifying` stage is shown before any answer text is
+released, that citation anchors are unique and sequential with invalid sentence bindings
+dropped, and that a follow-up turn sends bounded conversation messages.
 
-Coverage is reported, not gated: **72.31% statements, 58.58% branches, 78.26% functions**
-at the time of writing, with the admin page the largest uncovered area. Per § 2 that number
-is a floor, not a goal — this tier was added for the behaviors listed above, not for the
-percentage.
+Coverage is **gated**: [vitest.config.ts](../../apps/web/vitest.config.ts) sets minimums
+of 60% statements and lines and 50% branches and functions over the configured include
+list, and CI runs `npm run test:coverage`. Per § 2 those numbers are a floor, not a goal —
+this tier was added for the behaviors listed above, not for the percentage.
 
 ## 4. Integration Tests
 
@@ -115,18 +118,18 @@ This replaced tests that wrote into the development database and left ACL rows b
 result measured locally was evidence, because the next run started from state the previous
 run had polluted.
 
-- Each test runs in a transaction that is rolled back, except migration tests.
+- **Not yet implemented:** each test runs in a transaction that is rolled back, except migration tests. Today isolation comes from the per-run disposable database.
 - Fixtures create two tenants with overlapping-looking data (same document titles, similar content) so a leak is visible rather than coincidentally absent.
 - The `inference` service is stubbed with a deterministic fake returning fixed vectors and fixed rerank scores — retrieval logic is tested, model quality is not (that is the eval tier).
 - Anthropic calls are stubbed. No integration test hits a paid API.
 
-**High-value integration targets:** RLS enforcement, the fused retrieval SQL, HNSW behavior under a selective filter, version supersession and the partial unique index, idempotent ingest by content hash, ACL cache invalidation on `acl_version` bump, cursor pagination stability under concurrent inserts.
+**High-value integration targets:** RLS enforcement, the fused retrieval SQL, HNSW behavior under a selective filter, version supersession and the partial unique index, idempotent ingest by content hash, predicate invalidation on `acl_version` bump, cursor pagination stability under concurrent inserts.
 
 ## 5. Contract Tests
 
 - Assert the committed `openapi.json` matches what FastAPI generates. A drift fails the build — this is what surfaces an accidental breaking change in review.
 - Assert generated frontend types match the committed schema.
-- Assert every error `type` slug returned anywhere in the codebase appears in the registry in [api_rules.md § 5.2](./api_rules.md#52-error-type-registry).
+- **Not yet implemented:** assert every error `type` slug returned anywhere in the codebase appears in the registry in [api_rules.md § 5.2](./api_rules.md#52-error-type-registry).
 - Assert the internal `inference` contract: both services agree on request and response shapes.
 
 ## 6. Security Tests
@@ -163,7 +166,7 @@ The same rule covers the isolation tests below: "tenant A reads its own rows" pr
 | Cache | No Redis key is reachable across tenants |
 | Search results | An ANN query under tenant A never returns a tenant B chunk, including at high `ef_search` |
 | **Worker payload tampering** | An ingestion task whose payload has been edited to name tenant B cannot read or write tenant B rows. The tenant context comes from the job row under `rag_app`, never from the payload — see [architecture.md § 4.2](../context/architecture.md#42-layer-2--postgres-row-level-security). |
-| Role privilege | The connection used by ingestion has no `BYPASSRLS`; asserted against `pg_roles`, not assumed from configuration |
+| Role privilege | The connection that processes document content during ingestion has no `BYPASSRLS`; asserted against `pg_roles`, not assumed from configuration. Job-to-tenant resolution before that step uses the `BYPASSRLS` migration identity ([architecture.md § 4.2](../context/architecture.md#42-layer-2--postgres-row-level-security)). |
 
 ### 6.2 Access control
 
@@ -175,12 +178,12 @@ The same rule covers the isolation tests below: "tenant A reads its own rows" pr
 | No count leakage | Result counts and pagination totals are identical whether inaccessible documents exist or not |
 | Revocation | Removing an ACL entry takes effect on the **next** query. Asserted against the mechanism, not the outcome: the mutation and the `acl_version` bump commit in one transaction, and the version is re-read from Postgres per request. |
 | Stale version rejected | An `acl_version` supplied from a token or a cached session is never used to key the predicate |
-| Tool ACL | The `search_documents` tool runs under the caller's predicate, not a widened one |
+| Tool ACL | **Not yet implemented (no tools exist).** The `search_documents` tool runs under the caller's predicate, not a widened one |
 | Citation ACL | A citation never resolves to a chunk the caller cannot read |
 | Archived exclusion | An archived document is absent from new retrieval but its existing citations still resolve |
-| Erasure tombstone | After erasure, `query_citations` rows survive with content nulled — a historical answer degrades to "source erased" rather than dangling |
+| Erasure | After erasure, the document's chunks and the `query_citations` rows that pointed at them are deleted (cascade), stored answers that cited it are nulled, and `erasure_log` records the counts |
 | Legal hold | Erasure is refused with 409 while `legal_hold` is set |
-| **Content-delivery revocation window** | Proxy mode: a revoked user is refused on the next byte range. Presigned mode: the test asserts the **documented** behavior — an already-issued URL remains usable until expiry — so the exposure stays visible rather than being quietly assumed away. See [api_rules.md § 13.1](./api_rules.md#131-presigned-urls-are-bearer-credentials). |
+| **Content-delivery revocation window** | **Not yet implemented (no content route exists).** Proxy mode: a revoked user is refused on the next byte range. Presigned mode: the test asserts the **documented** behavior — an already-issued URL remains usable until expiry — so the exposure stays visible rather than being quietly assumed away. See [api_rules.md § 13.1](./api_rules.md#131-presigned-urls-are-bearer-credentials). |
 
 ### 6.3 Prompt injection — contract tests only
 
@@ -189,15 +192,15 @@ Deterministic assertions about how the request is *constructed* and how a hostil
 | Test | Assertion |
 | --- | --- |
 | Structural placement | Retrieved content appears only in `document` blocks — never in `system`, never concatenated into user text. Asserted on the serialized request body. |
-| Operator channel | Runtime instructions are sent as `role: "system"` messages, not as text inside a user turn |
-| Tool allowlist | The request exposes only read-only tools, ACL-bound, within the call cap |
-| Hostile-response handling | Given a mocked response attempting an unrequested tool call, the loop refuses it |
-| Detection | Injection-shaped text is flagged at ingest and counted in `injection_flagged_total` — a pure heuristic test, no model involved |
-| Egress scan | A mocked answer containing a secret pattern is blocked before leaving the API |
+| Operator channel | **Not yet implemented.** Runtime instructions are sent as `role: "system"` messages, not as text inside a user turn |
+| Tool allowlist | **Not yet implemented (no tools exist).** The request exposes only read-only tools, ACL-bound, within the call cap |
+| Hostile-response handling | **Not yet implemented.** Given a mocked response attempting an unrequested tool call, the loop refuses it |
+| Detection | Injection-shaped text is scored at ingest — a pure heuristic test, no model involved. The `injection_flagged_total` counter is not yet implemented |
+| Egress scan | **Not yet implemented (no egress scan exists).** A mocked answer containing a secret pattern is blocked before leaving the API |
 
 ### 6.4 Log hygiene
 
-Capture structured log output during an integration run and assert absence of: document content, chunk text, answer text, raw questions above `debug`, tokens, API keys, JWTs, and full email addresses.
+**Not yet implemented.** Capture structured log output during an integration run and assert absence of: document content, chunk text, answer text, raw questions above `debug`, tokens, API keys, JWTs, and full email addresses.
 
 ### 6.5 Dependency & secret scanning
 
@@ -257,7 +260,7 @@ injection evaluation is described in § 7.5.
 
 - Answer-quality judging uses `claude-haiku-4-5` with a **versioned rubric prompt**.
 - The rubric prompt hash is stored on `eval_runs.judge_prompt_hash`.
-- Comparing two runs with different judge hashes is flagged in the dashboard — a judge change must never be read as a quality change.
+- Comparing two runs with different judge hashes must be flagged — a judge change must never be read as a quality change. **Not yet implemented:** there is no dashboard, and the comparison endpoint returns each run's `judge_prompt_hash` without flagging a difference.
 - Judge prompts live in `packages/llm/src/llm/judges/` as package data, so the API and worker images carry them ([ADR-016](../context/architecture.md#adr-016--the-evaluation-runtime-is-a-package-evals-is-offline-tooling)). They change through the normal review process, and the recorded SHA-256 in `manifest.json` is asserted by `packages/llm/tests/test_judge.py`.
 
 ### 7.4 Baselines
@@ -293,7 +296,7 @@ Any successful injection is triaged as a `critical` finding regardless of the ag
 | E2E | Cassettes by default; a live-mode flag exists for manual verification |
 | **Eval** | **Live calls.** This is the only tier that spends money, and it is the point of the tier. |
 
-Cassettes live in `tests/cassettes/` and are regenerated deliberately, never automatically. A stale cassette that hides a real API change is caught by the nightly eval run.
+**Not yet implemented:** cassettes live in `tests/cassettes/` and are regenerated deliberately, never automatically. A stale cassette that hides a real API change is caught by the nightly eval run.
 
 **The embedder is also a source of nondeterminism, and it is pinned the same way.** CI and
 `make test-integration` set `INFERENCE_BACKEND=stub`, which returns SHA-256-derived unit
@@ -320,7 +323,7 @@ Every performance number in this project is meaningless without the workload tha
 
 ### 9.1 Micro-benchmarks (CI)
 
-`pytest-benchmark` on retrieval SQL against the `dev-cpu` corpus (10k chunks, seeded, warm). Regression threshold 20%. Catches an accidentally dropped index or a query plan flip — it is a *relative* guard, not an SLO measurement.
+**Not yet implemented.** `pytest-benchmark` on retrieval SQL against the `dev-cpu` corpus (10k chunks, seeded, warm). Regression threshold 20%. Catches an accidentally dropped index or a query plan flip — it is a *relative* guard, not an SLO measurement.
 
 ### 9.2 Load tests (k6, pre-release, against staging)
 
@@ -361,14 +364,14 @@ Plus accessibility assertions on each: keyboard navigation reaches every control
 
 | Kind | Location | Rule |
 | --- | --- | --- |
-| Unit fixtures | Inline or `tests/factories/` | Builder functions, not JSON blobs |
-| Integration seed | `tests/fixtures/seed.py` | Two tenants, overlapping-looking content |
+| Unit fixtures | Inline (`tests/factories/` is not yet created) | Builder functions, not JSON blobs |
+| Integration seed | `packages/db/src/db/seed.py` (`python -m db.seed`) | Two tenants (Acme, Globex) |
 | Eval corpus | `evals/fixtures/` | Synthetic, bilingual, committed |
 | Injection corpus | `evals/fixtures/injection/` | Adversarial documents |
-| Cassettes | `tests/cassettes/` | Regenerated deliberately |
+| Cassettes | `tests/cassettes/` (not yet created) | Regenerated deliberately |
 | Integration database | Created and dropped per run | Name must end `_test` or start `test_`; never a long-lived database (§ 4) |
 
-**No real customer data in any of them.** Enforced by a pattern test over the fixture directories.
+**No real customer data in any of them.** A pattern test over the fixture directories is not yet implemented; review enforces the rule.
 
 **No tier reuses state across runs.** Unit and frontend tiers hold none; the integration
 tier's database is created and dropped by the run that uses it. A test that passes only
@@ -396,7 +399,7 @@ eval-smoke | scheduled eval-full | e2e | adversarial | pre-release load
 | integration | `integration-db` | Yes | Postgres + Redis services, `enterprise_rag_test`, plus a real `inference` process on `INFERENCE_BACKEND=stub` |
 | migrations | `integration-db` | Yes | `upgrade head` → `downgrade -1` → `upgrade head` → seed, from an empty database |
 | **security** (deterministic) | `unit` / `integration-db` | Yes | Never skipped. Fully mocked — no live model call, which is what makes it a legitimate gate. |
-| eval-smoke | `eval-smoke` | Yes | Pull requests; deterministic 48-item stub-inference run across all eight slices, compared with `evals/baselines/t407-smoke.json`. Gates `recall@10`, `nDCG@10`, tenant leakage, and ACL bypass; answer metrics are report-only ([§ 7.2](#72-gates)). Hosted first-green evidence is pending for R-031. |
+| eval-smoke | `eval-smoke` | Yes | Pull requests and pushes to `main`; deterministic 48-item stub-inference run across all eight slices, compared with `evals/baselines/t407-smoke.json`. Gates `recall@10`, `nDCG@10`, tenant leakage, and ACL bypass; answer metrics are report-only ([§ 7.2](#72-gates)). Hosted first-green evidence is pending for R-031. |
 | build | `container-build` | See note below | Builds API/worker, inference, and web images; checks Compose configuration; imports `api.main`, `worker.tasks.eval`, and the judge rubric inside the built API/worker image (R-124). `next build` also runs in `typecheck`. No image publishing or deployment. |
 | e2e | — | — | Not wired |
 | eval-full | `eval-full` | No (reports) | Scheduled full 320-item, eight-slice run with four configured strategies; retains the report and makes no paid model calls. |

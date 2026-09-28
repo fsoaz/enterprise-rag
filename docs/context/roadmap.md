@@ -1,6 +1,6 @@
 # Roadmap — Enterprise RAG Document Intelligence System
 
-> **Status (2026-09-11):** Milestone A in progress: Phases 0–3 and 6a done, Phase 4 partial. Milestone B not started. Live status: [current_task.md](../execution/current_task.md).
+> **Status (2026-09-27):** Milestone A in progress. Phases 0–3 and 6a are implemented in their core, but several of their deliverables are not built (see the per-phase notes and the status labels in [architecture.md](./architecture.md)) and their exit criteria are not yet recorded as met, so by the rule below none is *done*. Phase 4 is partial. Milestone B has not started as a phase, although parts of Phase 5 exist (per-user rate limits, a rolling daily budget, citation staleness, Anthropic retries, and an extractive fallback). Live status: [current_task.md](../execution/current_task.md).
 > **Related:** [product.md](./product.md) · [architecture.md](./architecture.md) · [../tasks/README.md](../tasks/README.md)
 
 ---
@@ -63,7 +63,7 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
 - FastAPI `api` service with health/ready endpoints and OpenAPI generation
 - Celery `worker` service with a no-op task, proving broker wiring
 - `inference` service skeleton returning stub vectors (real models land in Phase 1)
-- Alembic wired; initial migration creating `tenants`, `users`, `groups`, `user_groups`, `roles`
+- Alembic wired; initial migration creating `tenants`, `users`, `groups`, `user_groups`, `roles` (as built, `0001_initial` creates every model table via `create_all`; see R-058)
 - **Row-Level Security enabled and policies written** for every tenant-scoped table
 - OIDC/JWT auth: JWKS verification, tenant context dependency, `SET LOCAL app.current_tenant` per transaction
 - CI: lint (`ruff`, `biome`), typecheck (`mypy`, `tsc`), unit tests, migration up/down check
@@ -93,7 +93,7 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
 
 - `POST /api/v1/documents` upload → S3/MinIO → `202 Accepted` + job resource
 - Ingestion pipeline in `worker`, one Celery task per stage with independent retries:
-  `download → parse → chunk → embed → index`
+  `download → parse → chunk → embed → index`. *As built:* one Celery task runs all stages and records the current stage; it has no Celery retries
 - Parsers: **PDF, Markdown, plain text**
 - Archival (`archived_at`) and the privileged erasure path — see [architecture.md § 6.4](./architecture.md#64-removal-archival-not-deletion). Deletion semantics ship with versioning, not after it: a system that can ingest but cannot correctly remove is not shippable.
 - Ingestion tasks run under the `rag_app` role with tenant context from the job row, never the payload
@@ -132,17 +132,19 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
 ### Deliverables
 
 - ACL model: `acl_entries`, `acl_versions`, resolution order (document deny → document allow → collection deny → collection allow → default deny)
-- ACL → SQL predicate compiler, with the `IN (...)` vs. materialized-join switch by cardinality
-- Redis-cached compiled predicate, invalidated by `acl_version` bump
+- ACL → SQL predicate compiler. *(The `IN (...)` vs. materialized-join switch by cardinality was dropped by [ADR-008](./architecture.md#adr-008--no-materialized-authorization-state).)*
+- Redis-cached compiled predicate, invalidated by `acl_version` bump. *Not built:* the predicate is recomputed per request
 - Dense arm: pgvector HNSW cosine, top-50, under the ACL + tenant + current-version predicate
 - Lexical arm: Postgres FTS `ts_rank_cd`, top-50, same predicate
-- RRF fusion (`k = 60`) as a single SQL statement with both arms as CTEs
+- RRF fusion (`k = 60`) as a single SQL statement with both arms as CTEs. *As built:* fused in Python over the two arms' results
 - **BGE-reranker-v2-m3** in `inference`; batched rerank of top-50 → top-8
 - `ef_search` tuning and the low-cardinality exact-search fallback
 - Context assembly with token budget and adjacent-chunk merging
 - Strategy interface: `dense_only`, `lexical_only`, `hybrid_rrf`, `hybrid_rerank`
 - `POST /api/v1/search` returning ranked chunks with scores and provenance
 - Collection and document ACL management endpoints
+
+> **As built (2026-09-27).** Not implemented from the list above: `ef_search` tuning, the exact-search fallback, the context token budget and adjacent-chunk merging, and the Redis predicate cache. ACL management is `POST`/`GET /acl/entries` and `DELETE /acl/entries/{id}`; there are no per-collection or per-document ACL routes. See [architecture.md § 5 and § 7](./architecture.md#7-retrieval-pipeline).
 
 ### Exit criteria
 
@@ -152,7 +154,7 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
 - [ ] A user with access to 5% of the corpus still gets a full top-8 (pre-filtering, not post-filtering — verified by a test that counts results)
 - [ ] Result counts do not leak the existence of inaccessible documents
 - [ ] Retrieval-only p95 ≤ 400 ms on a 100k-chunk corpus
-- [ ] Reranking measurably improves `nDCG@10` over `hybrid_rrf` alone — **blocked on T-206**; until then the default is `hybrid_rrf`, since the rerank stub is an identity pass-through
+- [ ] Reranking measurably improves `nDCG@10` over `hybrid_rrf` alone — real reranker weights are now the default backend, but no real-weights comparison has been recorded; until one is, the default stays `hybrid_rrf`
 
 **Stories:** KS-5, KW-4
 
@@ -171,13 +173,15 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
 - Anthropic client wrapper in `packages/llm`: model registry, adaptive thinking, streaming, retries, `stop_reason` handling, server-side `fallbacks: "default"`
 - Prompt assembly: cached stable system + tenant policy prefix, retrieved chunks as separate `document` blocks with `citations: {enabled: true}`
 - Citation mapping: `document_index` → `chunk_id` → `document_version_id`, persisted to `query_citations`
-- `POST /api/v1/chat/completions` with SSE streaming (`token`, `citation`, `usage`, `done`, `error`)
-- Multi-turn context (last 3 turns, per Q-3)
+- `POST /api/v1/chat/completions` with SSE streaming (`status`, `token`, `citation`, `usage`, `verdict`, `done`, `error`)
+- Multi-turn context (last six prior messages, i.e. three exchanges, per Q-3)
 - Read-only tool calling: `search_documents`, `get_document_metadata`, both ACL-bound, capped at 3 calls
 - Prompt-injection defense layers: structural placement, instruction hierarchy in the system prompt, mid-conversation `role: "system"` operator channel, tool allowlist, egress scan
 - Groundedness: citation coverage + Haiku entailment judge + retrieval confidence → verdict
 - Abstention path with closest-sources fallback
 - Prompt cache verification via `usage.cache_read_input_tokens`
+
+> **As built (2026-09-27).** Not implemented from the list above: server-side `fallbacks`, the tenant policy prefix, read-only tool calling, the `role: "system"` operator channel, the tool allowlist, and the egress scan. Prompt caching is configured but not expected to produce cache reads (R-126). See [architecture.md § 8–9](./architecture.md#8-generation--citations).
 
 ### Exit criteria
 
@@ -219,7 +223,7 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
   ([E-003](../execution/test_evidence.md)); the expanded T-402 artifact contains
   320 validated items (40 per slice).
 - [x] The strategy comparison produces a matrix with per-slice deltas — T-406 comparison runner/API report includes paired coverage, deltas, and significance
-- [ ] `hybrid_rerank` is demonstrably the best default, with numbers — **blocked on T-206.** A stub cannot beat RRF; the default is `hybrid_rrf` until real reranker weights land ([ADR-009](./architecture.md#adr-009--a-stub-degrades-to-a-no-op-never-to-a-wrong-signal))
+- [ ] `hybrid_rerank` is demonstrably the best default, with numbers — recorded comparisons ran on the deterministic stub, which cannot beat RRF ([ADR-009](./architecture.md#adr-009--a-stub-degrades-to-a-no-op-never-to-a-wrong-signal)); a real-weights comparison is still needed
 - [ ] A deliberate retrieval regression is caught by the PR gate — T-407 implements the
   deterministic `eval-smoke` gate and its regression tests; hosted GitHub Actions evidence
   is still pending before R-031 can be closed
@@ -227,7 +231,7 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
 - [ ] Injection success rate ≤ 1% on the `injection` slice — not measurable without a real `ANTHROPIC_API_KEY`; retrieval on that slice is scored, generation is not
 - [x] Q-1 is decided and recorded as [ADR-015](./architecture.md#adr-015--fixed-token-remains-the-production-chunking-default); Q-2 remains open for T-409
 
-> **Status note (2026-07-25).** The harness itself is real: it ingests `evals/fixtures` through the worker pipeline and calls `retrieve()` per item as the item's `acting_user`. It replaced a version that scored `gold_chunk_ids` against themselves and reported 1.0 on metrics it never computed (R-018). Two slices now show honest failures — `versioned` at 0.50 because retrieval has no `as_of` filter (R-030), and `unanswerable` at 0.00 by construction. Dataset volume is also well short of the "minimum 40 items per slice" deliverable: 14 items total.
+> **Status note (2026-07-25, superseded — `as_of` retrieval now exists and the dataset has 320 items).** The harness itself is real: it ingests `evals/fixtures` through the worker pipeline and calls `retrieve()` per item as the item's `acting_user`. It replaced a version that scored `gold_chunk_ids` against themselves and reported 1.0 on metrics it never computed (R-018). Two slices now show honest failures — `versioned` at 0.50 because retrieval has no `as_of` filter (R-030), and `unanswerable` at 0.00 by construction. Dataset volume is also well short of the "minimum 40 items per slice" deliverable: 14 items total.
 
 > **Status note (2026-09-07).** T-406 is complete. The comparison runner expands
 > strict JSON sweeps into sequential child runs, persists the full configuration in
@@ -255,7 +259,7 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
 
 **Stories:** KW-5, PA-4
 
-**Tasks:** `T-401` fixture corpus · `T-402` golden dataset authoring · `T-403` retrieval metrics · `T-404` answer-quality judges · `T-405` eval tables + API · `T-406` strategy comparison runner · `T-407` CI gates · `T-408` chunking experiment (Q-1) · `T-409` sparse-arm experiment (Q-2) · `T-410` evaluation runtime package (R-124, committed) · `T-411` bounded complexity cleanup (C11, C10, C13, C8)
+**Tasks:** `T-401` fixture corpus · `T-402` golden dataset authoring · `T-403` retrieval metrics · `T-404` answer-quality judges · `T-405` eval tables + API · `T-406` strategy comparison runner · `T-407` CI gates · `T-408` chunking experiment (Q-1) · `T-409` sparse-arm experiment (Q-2) · `T-410` evaluation runtime package (R-124, committed) · `T-411` bounded complexity cleanup (C11, C10, C13, C8; committed) · `T-412` documentation accuracy audit
 
 ---
 

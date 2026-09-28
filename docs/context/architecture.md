@@ -1,6 +1,8 @@
 # Architecture — Enterprise RAG Document Intelligence System
 
-> **Status:** Living baseline, revised as implementation evolves (last updated 2026-09-11). Milestone A is partially implemented. Several sections still describe target or proposed behavior; check [current_task.md](../execution/current_task.md) and the ADRs for what is built.
+> **Status:** Living baseline, revised as implementation evolves (last updated 2026-09-27). Milestone A is partially implemented; live status is in [current_task.md](../execution/current_task.md).
+>
+> **How to read status labels.** Sections 3–14 open with one of: **Implemented** — the section describes current code; **Partial** — the section describes the target design, and its status line names what exists today; **Proposed** — nothing in the section is built yet. Where a sentence inside a Partial section describes design rather than code, it is marked *Proposed* or has a *Current:* note. § 2 marks proposed entries inline, § 16 describes the current layout, and § 17 labels its own subsections. ADRs record decisions and are not rewritten; later corrections are appended.
 > **Related:** [product.md](./product.md) · [roadmap.md](./roadmap.md) · [../standards/api_rules.md](../standards/api_rules.md) · [../standards/ai_agent_rules.md](../standards/ai_agent_rules.md)
 
 ---
@@ -45,16 +47,16 @@
 | ORM / migrations | SQLAlchemy 2.0 (async) + Alembic | Mature async support; explicit migrations |
 | Database | PostgreSQL 16 + `pgvector` ≥ 0.7 | Vectors, full-text, ACL joins, and RLS in one transactional store |
 | Lexical search | Postgres FTS (`tsvector`, `ts_rank_cd`) | Removes a second datastore; `portuguese` + `english` configs cover the corpus |
-| Cache / queue / limits | Redis 7 | Response cache, rate-limit buckets, Celery broker & result backend |
-| Async jobs | Celery | Battle-tested retries, visibility, and scheduling for ingestion |
+| Cache / queue / limits | Redis 7 | Rate-limit counters, Celery broker & result backend. *Proposed:* response cache |
+| Async jobs | Celery | Background ingestion and evaluation runs. No periodic (beat) schedule is configured |
 | Embeddings | **BGE-M3**, self-hosted | 1024-dim, multilingual (strong PT + EN), 8k context, dense + sparse in one pass, zero per-token cost |
 | Reranking | **BGE-reranker-v2-m3**, self-hosted | Multilingual cross-encoder, pairs naturally with BGE-M3 |
-| LLM | Anthropic Claude via official SDK | `claude-opus-5` primary, `claude-haiku-4-5` for judging/classification |
+| LLM | Anthropic Claude via official SDK | `claude-opus-5` primary, `claude-haiku-4-5` for judging; `claude-sonnet-5` registered as a fallback but not called |
 | Object storage | MinIO (dev) / Amazon S3 (cloud) | Original file bytes; S3-compatible API in both environments |
-| Frontend | Next.js (App Router) + TypeScript + Tailwind | One app, three route groups; SSE streaming for chat. Controls are hand-rolled Tailwind — **no component library**. shadcn/ui was named in earlier drafts and never adopted (IS-35) |
+| Frontend | Next.js (App Router) + TypeScript + Tailwind | One app, two route groups (`(chat)`, `(admin)`); an evaluation UI is proposed; SSE streaming for chat. Controls are hand-rolled Tailwind — **no component library**. shadcn/ui was named in earlier drafts and never adopted (IS-35) |
 | Frontend i18n | Typed in-repo dictionary (`apps/web/src/lib/i18n.tsx`) | EN + PT, the two corpus languages. A React context and a `locale` cookie, not a framework: one dictionary object per locale, keys typed so a missing translation is a `tsc` failure |
 | Auth | OIDC / JWT — Keycloak (dev), Cognito or Auth0 (cloud) | Standard claims, no bespoke auth code. The browser holds a session cookie, never a token — see [ADR-013](#adr-013--the-browser-never-holds-a-token) |
-| Observability | OpenTelemetry, `structlog`, Prometheus | Traces across four services; JSON logs; metrics |
+| Observability | `structlog` (implemented); OpenTelemetry and Prometheus (proposed) | JSON logs today; traces and metrics are design targets |
 | Container / IaC | Docker Compose (implemented); Terraform → AWS ECS Fargate (proposed) | Local deployment exists; cloud infrastructure and deployment automation are not implemented in this repository |
 | Testing (Python) | pytest, Playwright, k6 | See [testing.md](../standards/testing.md) |
 | Testing (frontend) | Vitest + Testing Library + jsdom | Component and module tier for `apps/web`. Added because every frontend defect in the QA round survived `tsc`, `biome` and `next build` — none of which loads a page (R-070) |
@@ -63,23 +65,25 @@
 
 ## 3. Component Topology
 
+> **Status: Implemented.** The diagram shows current services and calls; proposed responsibilities in § 3.1 are marked.
+
 Five deployable units plus infrastructure.
 
 ```mermaid
 flowchart TB
     subgraph client["Client"]
-        WEB["web — Next.js<br/>chat · eval · admin"]
+        WEB["web — Next.js<br/>chat · admin"]
     end
 
     subgraph app["Application"]
         API["api — FastAPI<br/>auth · retrieval · generation"]
-        WRK["worker — Celery<br/>ingest · reindex · freshness"]
+        WRK["worker — Celery<br/>ingest · eval runs"]
         INF["inference — FastAPI<br/>BGE-M3 · BGE-reranker-v2-m3"]
     end
 
     subgraph data["Stateful"]
         PG[("PostgreSQL 16<br/>+ pgvector + FTS + RLS")]
-        RDS[("Redis<br/>cache · queue · limits")]
+        RDS[("Redis<br/>queue · rate limits")]
         OBJ[("S3 / MinIO<br/>original files")]
     end
 
@@ -98,20 +102,21 @@ flowchart TB
     RDS -->|"consume"| WRK
     WRK --> PG
     WRK --> OBJ
-    WRK -->|"embed chunks"| INF
+    WRK -->|"embed chunks · eval retrieval"| INF
+    WRK -->|"eval generation · judging"| EXT
 ```
 
 ### 3.1 Service responsibilities
 
 | Service | Owns | Never does |
 | --- | --- | --- |
-| `api` | Request auth, tenant context, ACL resolution, retrieval orchestration, prompt assembly, LLM calls, SSE streaming, cost ledger writes | Model inference; long-running parsing |
-| `worker` | Download → parse → OCR → chunk → embed → index; reindex; freshness sweeps; eval runs | Serve HTTP to clients |
+| `api` | Request auth, tenant context, ACL resolution, retrieval orchestration, prompt assembly, LLM calls, SSE streaming, cost ledger writes | Model inference. Parsing runs in the worker, except that the API runs ingestion inline when Celery cannot accept the task (or `INGEST_SYNC=true`) |
+| `worker` | Download → parse → chunk → embed → index; eval runs. *Proposed:* OCR, reindex, freshness sweeps | Serve HTTP to clients |
 | `inference` | Embedding and reranking over HTTP. Stateless, holds model weights. | Touch Postgres, know about tenants |
-| `web` | All three UIs; SSE consumption; citation rendering | Talk to Postgres, Redis, or Anthropic directly |
+| `web` | Chat and admin UIs; SSE consumption; citation rendering | Talk to Postgres, Redis, or Anthropic directly |
 | `postgres` | Every durable record, vectors, and full-text indexes | — |
 
-**Why `inference` is separate:** BGE-M3 plus the reranker is roughly 2.5 GB of weights. Bundling them into `api` would triple the API image, slow cold starts, and force API replicas to scale on GPU/CPU-memory pressure instead of request concurrency. As a separate service it can scale independently, be swapped for a hosted provider behind the same HTTP contract, and be given a GPU in cloud without touching the API.
+**Why `inference` is separate:** BGE-M3 plus the reranker is roughly 2.5 GB of weights ([VERIFY] size not measured in this repository). Bundling them into `api` would triple the API image, slow cold starts, and force API replicas to scale on GPU/CPU-memory pressure instead of request concurrency. As a separate service it can scale independently, be swapped for a hosted provider behind the same HTTP contract, and be given a GPU in cloud without touching the API.
 
 ### 3.2 Inference service contract
 
@@ -119,8 +124,10 @@ Two endpoints, versioned, auth by shared network boundary + service token:
 
 | Endpoint | Purpose |
 | --- | --- |
-| `POST /v1/embed` | `{texts: string[], mode: "query" \| "passage"}` → `{vectors: number[][], model: string, dim: int}` |
-| `POST /v1/rerank` | `{query: string, documents: string[], top_k: int}` → `{results: [{index, score}], model: string}` |
+| `POST /v1/embed` | `{texts: string[], mode: "query" \| "passage"}` → `{vectors: number[][], model: string, version: string, dim: int}` |
+| `POST /v1/rerank` | `{query: string, documents: string[], top_k: int}` → `{results: [{index, score}], model: string, version: string}` |
+
+Callers that request a specific model identity reject a response whose `model` or `version` differs.
 
 The contract is provider-agnostic on purpose: swapping BGE-M3 for Voyage or OpenAI is a change inside `inference`, not a change in `api`.
 
@@ -144,9 +151,10 @@ Three properties are load-bearing:
 - **An unknown value is an error.** `INFERENCE_BACKEND=BGE-m3`, a typo, or an empty string
   raises rather than defaulting, so a misconfigured deployment cannot quietly become the
   test profile.
-- **`stub` names itself in its output.** It reports `deterministic-hash-test-stub` and
-  `identity-rerank-test-stub` as its model names, so a `chunk_embeddings` row or an eval
-  report produced under the test profile is identifiable after the fact. Scores measured
+- **`stub` names itself in its output.** Embeddings keep the model name `BAAI/bge-m3` but
+  carry version `stub-v0` (real weights report `bge-v1`); the reranker reports
+  `identity-rerank-test-stub`. A `chunk_embeddings` row or an eval report produced under the
+  test profile is therefore identifiable after the fact. Scores measured
   under `stub` are wiring evidence and must never be quoted as retrieval quality.
 
 **Service token, and what "enforced" means here.** Both routes carry a dependency that compares the `Authorization: Bearer` value against `INFERENCE_SERVICE_TOKEN` with `hmac.compare_digest`. When the variable is **unset** the service stays open and logs a warning at startup, so `uvicorn inference.main:app` works with no configuration; every packaged deployment (Compose, CI, Dockerfile) sets it. This is deliberately not fail-closed — the failure mode of an unreachable embedder is a broken ingest, not a leak, and the service holds no tenant data. What it does buy: an attacker with network reach into the cluster cannot use the embedder as free compute or probe which documents are being indexed by timing.
@@ -155,11 +163,13 @@ Three properties are load-bearing:
 
 ## 4. Multi-Tenancy & Isolation
 
+> **Status: Partial.** Implemented: tenant from the verified token, RLS with transaction-local tenant context, the three-transaction ingest job, per-tenant storage keys and rate-limit keys. Current deviations: tenant filters are written per query (no repository base class or lint rule), and the job/run-to-tenant lookup uses the `BYPASSRLS` migration identity (see the role table).
+
 **Model: shared database, shared schema, `tenant_id` on every row, enforced twice.**
 
 ### 4.1 Layer 1 — application
 
-Every request derives `tenant_id` from the verified JWT claim. It is **never** read from a path parameter, query string, or request body. A repository base class injects `WHERE tenant_id = :current_tenant` into every query; a linting rule and a test fixture both fail the build if a model is added without `tenant_id`.
+Every request derives `tenant_id` from the verified JWT claim. It is **never** read from a path parameter, query string, or request body. Queries include an explicit tenant filter written at each call site. *Proposed:* a repository base class that injects `WHERE tenant_id = :current_tenant`, and a lint rule or test that fails when a model lacks `tenant_id`.
 
 ### 4.2 Layer 2 — Postgres Row-Level Security
 
@@ -181,11 +191,13 @@ Three database identities, with the split drawn so that nothing processing tenan
 
 | Role | Used by | Privilege |
 | --- | --- | --- |
-| `rag_migrate` | Alembic only, in the pre-deploy task | DDL; `BYPASSRLS` |
-| `rag_app` | `api` **and every ingestion task** | No `BYPASSRLS` — RLS applies in full |
-| `rag_maint` | Cross-tenant schedulers (freshness sweep, budget rollup) | May read tenant IDs to enumerate work; **must** `SET LOCAL app.current_tenant` before touching any tenant row |
+| Role | Designed use | Current use |
+| --- | --- | --- |
+| `rag_migrate` (DDL; `BYPASSRLS`) | Alembic only, in the pre-deploy task | Alembic and seeding; **also** at runtime for three narrow lookups before a tenant is known: the API resolves an OIDC `sub` to its user, and the worker resolves an ingestion job ID or evaluation run ID to its tenant. Compose passes `DATABASE_URL_MIGRATE` to both `api` and `worker`. |
+| `rag_app` (no `BYPASSRLS` — RLS applies in full) | `api` **and every ingestion task** | As designed: every tenant-scoped read and write, including all document processing |
+| `rag_maint` (no `BYPASSRLS`) | Cross-tenant schedulers (freshness sweep, budget rollup); **must** `SET LOCAL app.current_tenant` before touching any tenant row | No scheduler exists. The ingest task falls back to `DATABASE_URL_MAINT` for job resolution only when `DATABASE_URL_MIGRATE` is unset; because the role is `NOBYPASSRLS`, that fallback cannot read another tenant's job |
 
-Ingestion is the case that matters. An ingestion job parses a document the tenant supplied, so it must never hold a connection that RLS does not constrain. The scheduler enumerates job IDs under `rag_maint`, then each job executes under `rag_app` with a transaction-local tenant context read **from the job row in the database — never from the task payload**. A payload is serialized data that passed through a queue; treating it as an authorization input would make queue access equivalent to cross-tenant access.
+Ingestion is the case that matters. An ingestion job parses a document the tenant supplied, so it must never hold a connection that RLS does not constrain. Today the worker resolves the job's tenant with a short-lived `BYPASSRLS` connection that reads only `ingestion_jobs.tenant_id`, then every step of the job executes under `rag_app` with a transaction-local tenant context read **from the job row in the database — never from the task payload**. *Proposed:* enumerate work under `rag_maint` so no runtime process holds a `BYPASSRLS` credential (R-127). A payload is serialized data that passed through a queue; treating it as an authorization input would make queue access equivalent to cross-tenant access.
 
 The job runs as **three separate transactions**, not one:
 
@@ -205,16 +217,18 @@ Engines are built **per job invocation**, never cached on the module. The Celery
 | --- | --- |
 | Embeddings | `chunk_embeddings.tenant_id` + RLS; ANN search always runs under the tenant predicate |
 | Object storage | Key prefix `s3://<bucket>/<tenant_id>/<document_id>/<version_id>/…`; per-tenant IAM path condition in cloud |
-| Redis cache | Key prefix `t:<tenant_id>:…`; no cross-tenant key can be constructed |
-| Prompt cache | Tenant policy block is part of the cached prefix, so tenants cannot share a cache entry |
+| Redis | Only rate-limit counters are stored, keyed `ratelimit:<scope>:<tenant_id>:<user_id>:<window>`. *Proposed:* a response cache keyed `t:<tenant_id>:…` |
+| Prompt cache | *Proposed:* a tenant policy block in the cached prefix. Today the system prompt is shared and contains no tenant data |
 | Rate limits & budgets | Bucket key includes `tenant_id` |
-| Logs & traces | `tenant_id` as a structured field; never document content |
+| Logs | Never document content. *Proposed:* `tenant_id` as a structured field on every line, and traces |
 
 ### 4.4 What is *not* isolated
 
 Model weights in `inference` are shared — they carry no tenant data. Requests to `inference` are stateless and unlogged by content.
 
 ## 5. Access Control Model
+
+> **Status: Implemented**, except the compiled-predicate cache in § 5.3 step 4, which is proposed.
 
 ### 5.1 Subjects and resources
 
@@ -231,12 +245,12 @@ Permissions attach to **collections** (the common case) and to **individual docu
 
 | Role | Capabilities beyond read |
 | --- | --- |
-| `admin` | Everything below, plus ACL entry create/list. Bypasses ACL evaluation **within its own tenant** (never across tenants — that is RLS's job, and RLS has no bypass). |
+| `admin` | Everything below, plus ACL entry create/list/delete, erasure and legal hold, and the evaluation API. Bypasses ACL evaluation **within its own tenant** (never across tenants — that is RLS's job, and RLS has no bypass). |
 | `steward` | Curator: upload documents, archive, unarchive, create collections — each still subject to an ACL `write` check on the target collection. |
 | `member` | Read only, scoped by ACL. |
 | `viewer` | Read only, scoped by ACL. |
 
-Enforced as FastAPI dependencies in `apps/api/src/api/deps/auth.py` — `CuratorUser` (`admin`|`steward`) and `AclAdminUser` (`admin`) — resolved from `role_assignments` in Postgres. **Roles are never read from a token claim,** even on the OIDC path: `require_role` and `resolve_acl` must agree about the same caller, and only one of those two can read a JWT (R-019).
+Enforced as FastAPI dependencies in `apps/api/src/api/deps/auth.py` — `CuratorUser` (`admin`|`steward`) and `AclAdminUser` (`admin`) — resolved from the `roles` table (`RoleAssignment` model) in Postgres. **Roles are never read from a token claim,** even on the OIDC path: `require_role` and `resolve_acl` must agree about the same caller, and only one of those two can read a JWT (R-019).
 
 **Role and ACL are checked independently on writes.** `POST /documents` requires a curator role *and* ACL `write` on the target collection. Without the second check a steward scoped to one collection could inject documents into another — including one they cannot read back (R-013).
 
@@ -262,8 +276,8 @@ At query time the resolved permission set is compiled to a SQL predicate, **not*
 1. Read the tenant's current `acl_version` from the **authoritative database**.
 2. Resolve the user's subject set: `{user_id} ∪ {group_ids} ∪ {role_names}`.
 3. Compute the allowed collection set and the document-level allow/deny overrides.
-4. Cache the compiled predicate in Redis, keyed by `t:<tenant>:acl:<user_id>:<acl_version>`, TTL 5 min.
-5. Inject it into the retrieval CTEs.
+4. *Proposed:* cache the compiled predicate in Redis, keyed by `t:<tenant>:acl:<user_id>:<acl_version>`, TTL 5 min. **Current:** the predicate is recomputed on every request; nothing is cached.
+5. Inject it into both retrieval queries.
 
 The predicate is always a direct query against `acl_entries`. There is no materialized visibility table — see [ADR-008](#adr-008--no-materialized-authorization-state).
 
@@ -272,8 +286,8 @@ The predicate is always a direct query against `acl_entries`. There is no materi
 "Immediate revocation" is a claim that depends entirely on where the version number comes from, so the mechanism is specified rather than assumed:
 
 - The ACL mutation and the `acl_versions` increment **commit in the same transaction**. There is no window in which the entry has changed but the version has not.
-- Step 1 reads that version **from Postgres on every request** — never from the Redis cache, never from a JWT claim, never from session state. Only the *compiled predicate* is cached, and it is keyed by the version just read.
-- A bumped version therefore misses every existing cache entry on the very next request. Old entries are never invalidated explicitly; they simply become unreachable and expire.
+- Step 1 reads that version **from Postgres on every request** — never from a cache, never from a JWT claim, never from session state. Today nothing downstream is cached, so the next request always uses the new ACL state. If the proposed predicate cache is added, it must be keyed by the version just read.
+- With such a cache, a bumped version would miss every existing entry on the very next request. Old entries would never be invalidated explicitly; they would simply become unreachable and expire.
 - A version carried in a stale or long-lived token is never trusted for anything.
 
 The cost is one cheap indexed read per request, which buys a revocation guarantee that does not depend on cache eviction timing. `queries.acl_version` records the version actually used, so an audit can reconstruct which permission state produced a given answer.
@@ -290,11 +304,13 @@ Pre-filtering makes the permitted corpus *the* corpus for that request. It is mo
 
 ## 6. Document Versioning & Freshness
 
+> **Status: Partial.** Implemented: the version chain, point-in-time `as_of` retrieval, per-request citation freshness (`fresh`, `stale`, `superseded`, `unknown`), archival, erasure, legal hold, and the `DELETE` refusal. Proposed: the freshness signals beyond supersession and review interval, the stored `staleness_score` and review queue, and reindex triggers.
+
 ### 6.1 Version chain
 
 `documents` is the stable identity; `document_versions` is the content.
 
-- Each version stores a `content_sha256`. Re-uploading identical bytes is a no-op (idempotent ingest).
+- Each version stores a `content_sha256`. Uploading bytes identical to the current version of a non-erased document in the same collection is refused with `409 conflict`.
 - `supersedes_id` links a version to the one it replaces, forming an append-only chain.
 - `effective_from` / `effective_to` bound the version's validity window. Exactly one version per document has `effective_to IS NULL` — the **current** version.
 - **Chunks belong to a version**, never to a document. This is what makes historical questions ("what did the policy say in March?") answerable and makes supersession a pure metadata operation rather than a delete.
@@ -311,9 +327,11 @@ Retrieval defaults to `effective_to IS NULL`. An `as_of` parameter switches to p
 | Conflict | Two current versions in the same collection with high embedding similarity and contradictory extracted claims | Likely duplicate/contradictory policy — surface to the Steward |
 | Citation decay | Chunk cited frequently but its document is stale | High-impact staleness; sorts to the top of the review queue |
 
-A nightly Celery beat job recomputes a `staleness_score` per document from these signals. The score drives the Steward's review queue and a freshness badge on every citation in the chat UI.
+*Proposed:* a nightly Celery beat job recomputes a `staleness_score` per document from these signals, and the score drives the Steward's review queue. **Current:** no beat job exists and `staleness_score` is never written. Each citation's freshness badge is computed per request from version supersession and the review interval.
 
 ### 6.3 Reindex triggers
+
+*Proposed.* No reindex task exists. Uploading a new version ingests that version; re-running ingest for a version replaces its chunks in place, so a chunking change is not versioned.
 
 | Trigger | Scope |
 | --- | --- |
@@ -335,7 +353,7 @@ A system that promises resolvable historical citations, an append-only version c
 | Effect | Detail |
 | --- | --- |
 | New retrieval | Excluded — archived documents are filtered out alongside superseded versions |
-| Existing citations | Fully resolvable. A cited span still renders, badged "archived". |
+| Existing citations | Fully resolvable; the cited span still renders. *Proposed:* an "archived" badge — today the badge reflects version freshness only |
 | Versions, chunks, embeddings | Retained untouched |
 | Reversible | Yes — `POST /documents/{id}/unarchive` |
 
@@ -343,15 +361,15 @@ This covers the overwhelmingly common case: the document is obsolete, nobody sho
 
 #### Erasure — privileged, audited, irreversible
 
-`POST /admin/documents/{id}/erase` exists for legal and privacy obligations (GDPR/LGPD erasure requests, material uploaded in error, contractual purge). It requires a distinct admin permission, not the `manage` grant that lets a Steward archive.
+`POST /admin/documents/{id}/erase` exists for legal and privacy obligations (GDPR/LGPD erasure requests, material uploaded in error, contractual purge). It requires the `admin` role; archival requires a curator role plus ACL `write` on the collection.
 
 | Purged | Retained |
 | --- | --- |
-| Original bytes in object storage | The `documents` and `document_versions` rows, as tombstones with `erased_at` set |
-| `chunks.body` text | `query_citations` rows, with `cited_text` nulled |
-| `chunk_embeddings` rows | The `erasure_log` entry: actor, reason, legal basis, timestamp, affected counts |
+| Original bytes in object storage (after the database commit) | The `documents` and `document_versions` rows, as tombstones with `erased_at` set |
+| The document's `chunks` rows and their `chunk_embeddings` | `queries` rows that cited the document, with their stored answer text nulled |
+| `query_citations` rows that pointed at those chunks (deleted by cascade) | The `erasure_log` entry: actor, reason, legal basis, timestamp, versions, citations, and queries affected, plus any object-storage keys that failed to delete |
 
-The retention asymmetry is the point. **A historical answer degrades to "source erased" rather than dangling into a null reference** — the audit trail still shows that an answer was given, when, to whom, and that its source has since been erased under a recorded legal basis. That is what an auditor needs; a silently missing row is not.
+The retention asymmetry is the point. **A historical query record survives without the erased content** — the audit trail still shows that a question was answered, when, and by whom, and `erasure_log` records that its source was erased under a recorded legal basis. That is what an auditor needs; a silently missing row is not.
 
 Erasure is refused with 409 while a `legal_hold` flag is set on the document, so a retention obligation cannot be defeated by a deletion request.
 
@@ -361,27 +379,32 @@ The route exists only to return `405` with a problem body pointing at `/archive`
 
 ## 7. Retrieval Pipeline
 
-Seven stages. Every stage sits behind an interface and is individually switchable by the evaluation harness.
+> **Status: Partial.** Implemented: the ACL predicate, dense and lexical arms, RRF fusion (in Python), optional cross-encoder reranking, and per-chunk `document` blocks, selectable through four strategies. Stage 1 is a lightweight language heuristic; stage 2 and the stage-7 token budget are proposed.
+
+Seven stages in the design. Strategies select which implemented stages run.
 
 ```mermaid
 flowchart LR
     Q["Query"] --> N["1. Normalize<br/>+ detect language"]
-    N --> E["2. Expand<br/>(optional, Haiku)"]
+    N --> E["2. Expand<br/>(proposed)"]
     E --> ACL["3. Resolve ACL<br/>→ SQL predicate"]
     ACL --> D["4a. Dense<br/>pgvector HNSW<br/>top-50"]
     ACL --> L["4b. Lexical<br/>Postgres FTS<br/>top-50"]
-    D --> F["5. RRF fusion"]
+    D --> F["5. RRF fusion<br/>(in process)"]
     L --> F
-    F --> R["6. Cross-encoder<br/>rerank → top-8"]
-    R --> C["7. Context assembly<br/>token budget"]
+    F --> R["6. Cross-encoder rerank<br/>(hybrid_rerank only)"]
+    F -.->|"hybrid_rrf (default)"| C
+    R --> C["7. Context assembly"]
     C --> G["Generation"]
 ```
 
 ### 7.1 Stage 1 — Normalization & language detection
 
-Unicode NFKC, whitespace collapse, no aggressive stemming (the FTS config handles that per-language). Language detected with a fast classifier (`fasttext-langdetect` or equivalent); result determines which `tsvector` config gets primary weight. Detection is a *hint*, not a filter — both language configs are always queried, because a Portuguese question about an English document is a first-class case.
+**Current:** the question's language is detected with a marker-word heuristic (`domain.text`), and it selects the FTS config used to parse the question for degraded-mode evidence ([ADR-012](#adr-012--degraded-mode-evidence-is-lexical-or-it-does-not-exist)). *Proposed:* Unicode NFKC normalization and a trained language classifier. Detection is a *hint*, not a filter — both language configs are always queried, because a Portuguese question about an English document is a first-class case.
 
 ### 7.2 Stage 2 — Query expansion (optional, off by default in v1)
+
+*Proposed; not implemented.*
 
 For short or ambiguous queries, `claude-haiku-4-5` generates 2–3 paraphrases plus a hypothetical answer (HyDE). Each variant is embedded and its results merged into the fusion step. Costed and measured in Phase 4 before being enabled by default — expansion adds a full LLM round trip to the latency budget.
 
@@ -392,12 +415,12 @@ See [§ 5.3](#53-resolution-to-a-retrieval-predicate). Produces a SQL fragment i
 ### 7.4 Stage 4a — Dense retrieval
 
 - Column: `chunk_embeddings.embedding vector(1024)`
-- Index: HNSW, `vector_cosine_ops`, `m = 16`, `ef_construction = 64`; `ef_search` tuned per environment (start 100)
+- Index: HNSW, `vector_cosine_ops`, `m = 16`, `ef_construction = 64`. *Proposed:* `ef_search` tuned per environment (start 100); today the pgvector default applies
 - Query embedded via `inference` with `mode: "query"` (BGE-M3 uses different instruction prefixes for queries vs. passages — using the wrong one measurably degrades recall)
 - Predicate: tenant + ACL + current-version + active-embedding-generation
 - Returns top-50 with cosine distance
 
-**Note on HNSW and filtering:** a highly selective ACL predicate can make HNSW under-return, because the index is traversed before the filter prunes. Mitigations, in order: raise `ef_search` for selective predicates; fall back to an exact `IVFFlat`-free sequential scan when the permitted corpus is below a threshold (a few thousand chunks, where exact search is fast anyway). The threshold is a tuned constant, validated in Phase 4.
+**Note on HNSW and filtering:** a highly selective ACL predicate can make HNSW under-return, because the index is traversed before the filter prunes. *Proposed* mitigations, in order (none is implemented yet): raise `ef_search` for selective predicates; fall back to an exact `IVFFlat`-free sequential scan when the permitted corpus is below a threshold (a few thousand chunks, where exact search is fast anyway). The threshold is a tuned constant, validated in Phase 4.
 
 ### 7.5 Stage 4b — Lexical retrieval
 
@@ -413,7 +436,7 @@ See [§ 5.3](#53-resolution-to-a-retrieval-predicate). Produces a SQL fragment i
 score(d) = Σ_i  1 / (k + rank_i(d))      k = 60
 ```
 
-Rank-based, so no score normalization is needed between two incomparable scales (cosine distance vs. `ts_rank_cd`). Implemented as a single SQL statement with both arms as CTEs — one round trip to Postgres, not two. `k = 60` is the literature default and is a tunable in the strategy comparison.
+Rank-based, so no score normalization is needed between two incomparable scales (cosine distance vs. `ts_rank_cd`). The two arms run as separate queries and are fused in Python (`retrieval.fusion`). `k = 60` is the literature default and is a tunable in the strategy comparison.
 
 ### 7.7 Stage 6 — Reranking
 
@@ -421,10 +444,8 @@ Top-50 fused candidates → `inference` `POST /v1/rerank` → BGE-reranker-v2-m3
 
 ### 7.8 Stage 7 — Context assembly
 
-- Token budget for retrieved context: 24k tokens default (configurable per tenant)
-- Chunks packed by rerank score until the budget is reached
-- Adjacent chunks from the same document version are merged to restore continuity
-- Each chunk carries its metadata: document title, version, `effective_from`, collection, staleness badge
+- **Current:** the top-k hits are passed in rank order, each titled with its document title (plus the `[UNTRUSTED …]` marker when flagged).
+- *Proposed:* a token budget for retrieved context (24k tokens default, configurable per tenant), packing by rerank score, merging adjacent chunks from the same version, and per-chunk version, `effective_from`, collection, and staleness metadata.
 - Chunks are emitted as **separate `document` content blocks**, not concatenated — this is what makes native citations resolvable to a specific source
 
 ### 7.9 Configurable strategies
@@ -437,27 +458,31 @@ The harness in [§ 11](#11-evaluation-architecture) can run any of these against
 | `lexical_only` | 4b → 7 |
 | `hybrid_rrf` | 4a + 4b → 5 → 7 *(current default — see below)* |
 | `hybrid_rerank` | 4a + 4b → 5 → 6 → 7 *(target default)* |
-| `hybrid_rerank_expand` | 2 → 4a + 4b → 5 → 6 → 7 |
-| `hybrid_rerank_sparse` | adds BGE-M3 sparse vectors as a third arm (Q-2) |
+| `hybrid_rerank_expand` | *Proposed:* 2 → 4a + 4b → 5 → 6 → 7 |
+| `hybrid_rerank_sparse` | *Proposed:* adds BGE-M3 sparse vectors as a third arm (Q-2, T-409) |
 
-**The default is `hybrid_rrf` while the reranker is a stub.** `hybrid_rerank` remains the intended default and the Phase 2 exit criterion still requires it to beat `hybrid_rrf` with numbers — but a stub cannot beat anything, and the length-sorting stub that shipped first actively degraded the fused order it was handed (R-016). The default reverts to `hybrid_rerank` when real BGE-reranker-v2-m3 weights land (T-206) and the eval shows the improvement.
+Only the first four strategies exist in code (`domain.types`).
+
+**The default is `hybrid_rrf` until a real-weights comparison justifies changing it.** `hybrid_rerank` remains the intended default and the Phase 2 exit criterion still requires it to beat `hybrid_rrf` with numbers. The length-sorting stub that shipped first actively degraded the fused order it was handed (R-016). Real BGE-reranker-v2-m3 weights are now the default inference backend (§ 3.2), but the recorded strategy comparisons ran on the deterministic stub, so no measured real-weights comparison supports the switch yet.
 
 ## 8. Generation & Citations
+
+> **Status: Partial.** Implemented: cited generation with native citations, the request shape (with a shared system prompt), buffered SSE streaming, and the multi-turn history rules. Proposed: the tenant policy block, effective prompt caching, the Sonnet fallback tier, and tool calling.
 
 ### 8.1 Model roles
 
 | Purpose | Model | Notes |
 | --- | --- | --- |
 | Answer generation | `claude-opus-5` | Primary. 1M context, $5/$25 per MTok. |
-| Degraded generation | `claude-sonnet-5` | Fallback tier |
-| Query expansion, entailment judging, classification | `claude-haiku-4-5` | $1/$5 per MTok — cheap enough to run on every query |
+| Degraded generation | `claude-sonnet-5` | *Proposed* fallback tier. Registered in `llm.models` but never called; generation failures currently fall back to an extractive answer |
+| Entailment judging (and, when built, query expansion) | `claude-haiku-4-5` | $1/$5 per MTok — cheap enough to run on every query |
 
 Model IDs are exact strings with no date suffix. See [ai_agent_rules.md § B](../standards/ai_agent_rules.md#part-b--llm-integration-rules) for the full set of API constraints that apply to every call in this codebase.
 
 ### 8.2 Request shape
 
 ```text
-system:   [ <stable instructions + tenant policy>  ← cache_control breakpoint ]
+system:   [ <stable instructions>  ← cache_control breakpoint ]   (tenant policy: proposed)
 messages: [
   ...prior turns, text-only, most recent 6, alternating user/assistant
   { role: "user", content: [
@@ -474,7 +499,7 @@ stream:        true
 
 **Conversation history is text, and only the final turn carries documents.** A client may
 send `messages` instead of `question`; the last message is the question, and up to six
-preceding turns are replayed as plain text. Prior turns deliberately do **not** re-attach
+preceding messages (three user/assistant exchanges) are replayed as plain text. Prior turns deliberately do **not** re-attach
 their `document` blocks:
 
 - Retrieval runs against the current question, so the chunks that matter are already in
@@ -510,22 +535,22 @@ Each returned `document_index` is mapped back to the `chunk_id` and `document_ve
 
 ### 8.4 Prompt caching
 
-Render order is `tools` → `system` → `messages`. The stable prefix is the system instructions plus the tenant policy block; the `cache_control` breakpoint goes on the last system block. Retrieved chunks and the user question follow it, because they change every request.
+Render order is `tools` → `system` → `messages`. The designed stable prefix is the system instructions plus a tenant policy block; the `cache_control` breakpoint goes on the last system block. **Current:** there is no tenant policy block, and the system prompt alone is shorter than the minimum cacheable prefix below, so the breakpoint is not expected to produce cache reads (R-126). Retrieved chunks and the user question follow it, because they change every request.
 
 Rules enforced by review:
 
 - Nothing volatile in the system prompt — no timestamps, no request IDs, no user names. Dynamic context goes into the message array.
 - Tool definitions are serialized deterministically (sorted by name).
 - Cache effectiveness is verified from `usage.cache_read_input_tokens`, not assumed. Zero reads across repeated queries means a silent invalidator, and it is a bug.
-- On `claude-opus-5` the minimum cacheable prefix is 512 tokens.
+- On `claude-opus-5` the minimum cacheable prefix is 512 tokens. [VERIFY] Confirm against Anthropic's current documentation.
 
 ### 8.5 Streaming
 
-SSE to the browser. Event names are fixed in [api_rules.md § 7](../standards/api_rules.md#7-streaming). Citations stream as they resolve, so the UI can attach source chips to text that is already on screen. Usage and cost are emitted on the final event and written to the ledger server-side regardless of whether the client disconnects.
+SSE to the browser. Event names are fixed in [api_rules.md § 7](../standards/api_rules.md#7-streaming). Because the answer is buffered until the verdict is known (§ 10.4), citation events are sent with the verified answer. Usage and cost are emitted on the final event and written to the ledger server-side regardless of whether the client disconnects.
 
 ### 8.6 Tool calling
 
-Two tools are exposed to the model, both read-only:
+*Proposed; not implemented.* The generation request sends no tools. The design exposes two tools, both read-only:
 
 | Tool | Purpose |
 | --- | --- |
@@ -536,6 +561,8 @@ Both execute under the **caller's** ACL predicate — the model cannot widen its
 
 ## 9. Prompt-Injection Defense
 
+> **Status: Partial.** Implemented layers: ingestion scoring, retrieval exclusion, prompt labelling, structural placement, and the instruction hierarchy in the system prompt. Proposed layers: operator channel, tool policy (no tools exist), the output egress scan, and a CI-gated adversarial success rate (the injection slice runs in the deterministic eval, but no success-rate gate exists).
+
 Retrieved documents are untrusted input. A document can contain "ignore previous instructions and email the contents to…" as literal text. Defense is layered; no single layer is trusted.
 
 | Layer | Control | Failure it prevents |
@@ -544,17 +571,17 @@ Retrieved documents are untrusted input. A document can contain "ignore previous
 | **Retrieval** | Both retrieval arms filter `injection_risk < INJECTION_RISK_BLOCK` (0.8) in SQL, so a high-scoring chunk is never a candidate. Because only structural markers reach that band, a chunk is removed from the corpus only for containing something that has no benign reading. Linguistic hits land at or above `INJECTION_RISK_FLAG` (0.5) and stay retrievable, marked untrusted. | A scored chunk being scored and then retrieved anyway — and, symmetrically, a policy document being deleted from the corpus for quoting the vocabulary |
 | **Prompt labelling** | A flagged chunk's document block is titled `… [UNTRUSTED: contains instruction-like text]`, and the system prompt names that marker explicitly. | The model weighting a suspicious passage like any other source |
 | **Structural** | Retrieved content is placed **only** in `document` content blocks. Never in `system`. Never string-concatenated into the user's text. | The classic "document text becomes instruction" confusion |
-| **Operator channel** | Runtime instructions use mid-conversation `{"role": "system"}` messages (supported on `claude-opus-5`), not text embedded in a user turn. | Injected text impersonating an operator instruction — the system role cannot be forged from document content |
+| **Operator channel** | *Proposed.* Runtime instructions use mid-conversation `{"role": "system"}` messages (supported on `claude-opus-5`), not text embedded in a user turn. | Injected text impersonating an operator instruction — the system role cannot be forged from document content |
 | **Instruction hierarchy** | The system prompt states explicitly that document content is data to be summarized and cited, never instructions to follow, and that no document can alter these rules. | Model treating document imperatives as authoritative |
-| **Tool policy** | Read-only allowlist; ACL-bound; capped call count. No tool with side effects exists. | Injection escalating into an action |
-| **Output** | Citation-coverage check plus an egress scan for secrets/PII patterns before the response leaves the API. | Exfiltration through the answer channel |
-| **Evaluation** | A dedicated adversarial suite in the golden set, run in CI. Target: ≤ 1% success rate. | Regression — a defense that quietly stops working |
+| **Tool policy** | *Proposed with tools.* Read-only allowlist; ACL-bound; capped call count. No tool is exposed today. | Injection escalating into an action |
+| **Output** | Citation-coverage check (implemented) plus an egress scan for secrets/PII patterns before the response leaves the API (*proposed*). | Exfiltration through the answer channel |
+| **Evaluation** | The golden set's `injection` slice runs in the deterministic CI eval. *Proposed:* a live adversarial suite with a ≤ 1% success-rate target. | Regression — a defense that quietly stops working |
 
 **Explicit non-goal:** perfect prevention. The goal is defense in depth plus *detection*, so an injection attempt is visible in logs and metrics rather than silently successful.
 
 > **Scoring is not enforcement.** For the whole of Milestone A, `injection_risk` was
 > computed at ingest, written to `chunks`, and read by nothing: the retrieval and
-> generation paths never referenced the column. Every layer in the table above except
+> generation paths never referenced the column. At that time every layer in the table above except
 > ingestion was documentation rather than code, and a flagged chunk reached the model
 > byte-for-byte identically to a clean one. The Retrieval and Prompt-labelling rows are
 > what closed that gap. When adding a signal, add the code that acts on it in the same
@@ -562,7 +589,9 @@ Retrieved documents are untrusted input. A document can contain "ignore previous
 
 ## 10. Groundedness & Unsupported-Answer Detection
 
-Three independent signals, computed per answer, combined into a verdict. All three are persisted on the `queries` row.
+> **Status: Implemented**, except per-tenant thresholds and the evaluation dashboard.
+
+Three independent signals, computed per answer, combined into a verdict. The verdict and citation coverage are persisted on the `queries` row; entailment labels and retrieval confidence are not stored.
 
 ### 10.1 Signal 1 — Citation coverage (free, deterministic)
 
@@ -595,11 +624,11 @@ Top score plus the score gap between rank 1 and rank 5, as `0.7 × top + 0.3 × 
 | --- | --- | --- |
 | `grounded` | Coverage ≥ 0.9 **and** no `contradicted` **and** normalized retrieval confidence ≥ 0.15 | Serve normally |
 | `partial` | Coverage 0.6–0.9, or ≥ 1 `partial` entailment | Serve with a visible "partially supported" banner; log for review |
-| `unsupported` | Coverage < 0.6, or any `contradicted`, or normalized retrieval confidence < 0.15 | **Abstain.** Return "I could not find support for this in the documents you have access to," plus the closest sources found. |
+| `unsupported` | Coverage < 0.6, or any `contradicted`, or every entailment label `unrelated`, or normalized retrieval confidence < 0.15 | **Abstain.** Return "I could not find support for this in the documents you have access to," plus the closest sources found. |
 
 `citation_coverage` counts substantive sentences by their index in the **full** sentence list. Discourse sentences are excluded by index rather than by rebuilding a filtered list — filtering first renumbered the survivors, so every citation index then referred to the wrong sentence. Correspondingly, `CitationSpan.answer_sentence_idx` is resolved from the character offset of the text block that carried the citation, not from a running count of periods.
 
-Abstention is a *feature*, and the abstention rate is a tracked metric on the eval dashboard in both directions: too high means retrieval is failing; too low means the thresholds are not protecting anyone. Thresholds are per-tenant configurable — a healthcare tenant will want them stricter than a SaaS docs tenant.
+Abstention is a *feature*, and the abstention rate is a tracked metric in both directions: too high means retrieval is failing; too low means the thresholds are not protecting anyone. The evaluation report computes it; a dashboard is proposed. *Proposed:* per-tenant thresholds — a healthcare tenant will want them stricter than a SaaS docs tenant. Today the thresholds are code defaults in `llm.groundedness`.
 
 #### The verdict is computed before any answer text is sent
 
@@ -614,6 +643,8 @@ first token the safety architecture deliberately withholds.
 If live streaming is reinstated for latency reasons, it needs a protocol change the client honours — a `retract` event that clears the buffer — not merely a reordering.
 
 ## 11. Evaluation Architecture
+
+> **Status: Implemented**, except the dashboard and regression-issue automation in § 11.3–11.4, which are proposed.
 
 ### 11.1 Golden dataset
 
@@ -630,7 +661,7 @@ Committed to `evals/datasets/`, versioned with the code, no real customer data.
 | `permission` | Same question, different users; the correct answer differs by ACL |
 | `injection` | Adversarial documents attempting instruction hijack |
 
-Each item: `question`, `expected_answer_facts[]`, `gold_chunk_ids[]`, `as_of`, `acting_user`, `should_abstain`.
+Each item: `question`, `expected_answer_facts[]`, `gold_chunk_ids[]`, `as_of`, `acting_user`, `should_abstain`, plus `slice`, `language`, and optional must-exclude labels for permission and injection checks.
 
 #### The corpus behind the gold labels
 
@@ -657,9 +688,11 @@ Answer-quality metrics use `claude-haiku-4-5` as judge with a fixed, versioned r
 
 ### 11.3 Strategy comparison
 
-An eval run is `(dataset_version, strategy, embedding_model, reranker, generator_model, params)`. The dashboard renders a comparison matrix across runs with per-slice deltas and significance flags, so "hybrid+rerank beats dense-only" is a measured claim with a number attached, not a design assertion. This is [differentiator #5](./product.md#6-differentiators-vs-tutorial-rag).
+An eval run is `(dataset_version, strategy, embedding_model, reranker, generator_model, params)`. *Proposed:* a dashboard renders a comparison matrix across runs with per-slice deltas and significance flags, so "hybrid+rerank beats dense-only" is a measured claim with a number attached, not a design assertion. This is [differentiator #5](./product.md#6-differentiators-vs-tutorial-rag).
 
-The current API surface is `GET /api/v1/evals/runs/compare?ids=a,b,c`. Run IDs
+**Current runtime.** The admin-only evaluation API ([api_rules.md § 12](../standards/api_rules.md#evaluation)) registers datasets, starts runs (`POST /api/v1/evals/runs`, 202), and reports run detail and per-item results. A run is committed as `queued` before the `worker.tasks.eval.run_eval` Celery task is published; the task retries with backoff up to three times and finishes the run as `complete`, `incomplete` (some items failed), or `failed`. Run status and progress are stored in `eval_runs.params`. Metrics and the comparison report live in `packages/evaluation` ([ADR-016](#adr-016--the-evaluation-runtime-is-a-package-evals-is-offline-tooling)); the generated [OpenAPI schema](../../openapi.json) is the field reference.
+
+The comparison surface is `GET /api/v1/evals/runs/compare?ids=a,b,c`. Run IDs
 are ordered; the first is the baseline, and every run must be terminal `complete`
 with exactly one result for every item in the shared dataset. The report includes
 overall and per-slice values, signed and absolute baseline deltas, coverage and
@@ -681,9 +714,9 @@ a fixed seed. This is the sole comparison endpoint.
 The pull-request `eval-smoke` job runs the production API/worker path against disposable
 Postgres and Redis plus deterministic stub inference, selects 48 items across all eight
 slices, and gates recall@10 and nDCG@10 against the committed baseline with 0.02
-allowances. Tenant leakage and ACL bypass must be zero across every run. Faithfulness,
+allowances. The smoke gate requires tenant leakage and ACL bypass of zero. The full run is report-only; T-408 recorded ACL bypass of 0.0125 in its injection slice, under investigation ([ADR-015](#adr-015--fixed-token-remains-the-production-chunking-default)). Faithfulness,
 citation precision, unsupported-answer rate, and correct-abstention rate are computed
-and reported but have no deterministic thresholds. The scheduled `eval-full` job
+and reported but have no deterministic thresholds. The `eval-smoke` job runs on pull requests and pushes to `main`. The nightly `eval-full` workflow
 runs all 320 items and four configured retrieval strategies, retaining its report without
 paid model calls. The local baseline and focused gate tests are committed in
 `evals/baselines/` and `evals/harness/`.
@@ -694,32 +727,40 @@ remain outside this deterministic gate.
 
 ## 12. Cost, Quotas & Observability
 
+> **Status: Partial.** Implemented: the cost ledger (with code-constant prices), per-user fixed-window rate limits, the rolling 24-hour tenant budget, `structlog` JSON logs, and the `queries` audit record. Proposed: a versioned price table in use, token buckets, monthly budgets and warnings, tracing, and metrics.
+
 ### 12.1 Cost ledger
 
 One `cost_ledger` row per LLM call — generation, judging, expansion, eval. No exceptions; an un-ledgered call is a review-blocking defect.
 
-Recorded: `tenant_id`, `query_id`, `purpose`, `model`, `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `latency_ms`, `computed_cost_usd`, `price_table_version`.
+Recorded: `tenant_id`, `query_id` or `eval_run_id`/`eval_item_id`, `purpose`, `model`, `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `latency_ms`, `computed_cost_usd`, `reported_cost_usd`, `status`, `error_detail`, `price_table_version`.
 
-Prices live in a **versioned table**, not in code constants. Historical rows keep the price version they were computed under, so a provider price change never silently rewrites last month's reporting.
+*Designed:* prices live in a **versioned table**, not in code constants. Historical rows keep the price version they were computed under, so a provider price change never silently rewrites last month's reporting. **Current:** prices are constants in `packages/llm/src/llm/models.py` recorded as `price_table_version = "v0"`; the `model_prices` table exists but is not read (R-125).
 
 ### 12.2 Quotas
 
 | Level | Control |
 | --- | --- |
-| Per user | Requests/minute, token bucket in Redis |
-| Per tenant | Requests/minute, plus a monthly USD budget |
-| Budget behavior | Soft warning at 80% (banner + webhook); hard stop at 100% (429 with a distinct problem type); admin override available |
+| Per user | **Current:** requests/minute per route group, a fixed-window counter in Redis. *Proposed:* token bucket |
+| Per tenant | **Current:** a rolling 24-hour USD budget (`TENANT_DAILY_BUDGET_USD`) checked against `cost_ledger` before generation. *Proposed:* tenant request limits and a monthly budget |
+| Budget behavior | **Current:** hard stop (429 `quota-exceeded`). *Proposed:* soft warning at 80% (banner + webhook) and admin override |
+
+Current limits and headers are specified in [api_rules.md § 9](../standards/api_rules.md#9-rate-limits--quotas).
 
 ### 12.3 Observability
 
-- **Traces** — OpenTelemetry, one trace per request spanning `web → api → {postgres, inference, anthropic}`. Spans per retrieval stage, so a latency regression is attributable to a stage rather than to "retrieval."
-- **Logs** — `structlog` JSON. Every line carries `request_id`, `tenant_id`, `user_id`, `route`. **Never** document content, chunk text, or answer text.
-- **Metrics** — Prometheus. Beyond the usual RED metrics: `retrieval_stage_duration_seconds`, `rerank_candidates`, `citation_coverage_ratio`, `groundedness_verdict_total{verdict}`, `llm_tokens_total{model,kind}`, `prompt_cache_hit_ratio`, `ingestion_job_duration_seconds{stage}`, `injection_flagged_total`.
-- **Audit trail** — `queries` + `query_citations` retain enough to reconstruct any answer: question, user, resolved ACL version, retrieved chunk IDs with scores, document version IDs, model, prompt hash, verdict, cost.
+- **Traces** — *Proposed.* OpenTelemetry, one trace per request spanning `web → api → {postgres, inference, anthropic}`. Spans per retrieval stage, so a latency regression is attributable to a stage rather than to "retrieval."
+- **Logs** — `structlog` JSON (implemented). *Proposed:* every line carries `request_id`, `tenant_id`, `user_id`, `route`; context binding is not implemented yet. **Never** document content, chunk text, or answer text.
+- **Metrics** — *Proposed.* Prometheus; no metrics endpoint exists. Beyond the usual RED metrics: `retrieval_stage_duration_seconds`, `rerank_candidates`, `citation_coverage_ratio`, `groundedness_verdict_total{verdict}`, `llm_tokens_total{model,kind}`, `prompt_cache_hit_ratio`, `ingestion_job_duration_seconds{stage}`, `injection_flagged_total`.
+- **Audit trail** — `queries` + `query_citations` retain enough to reconstruct any answer: question, user, resolved ACL version, retrieved chunk IDs with scores, document version IDs, model, prompt hash (currently a SHA-256 of the question, not of the full prompt), verdict, cost.
 
 ## 13. Resilience Policies
 
+> **Status: Partial.** Implemented: bounded HTTP timeouts, `tenacity` retries on transient Anthropic errors, retrieval before the SSE stream opens (so inference failure is a clean 503), and the extractive fallback when generation fails. Proposed: the remaining timeout policies, circuit breakers, rerank and lexical-only degradation, and the Sonnet tier.
+
 ### 13.1 Timeouts
+
+The table is the design target. **Current:** query embedding 30 s, reranking 60 s, and worker embedding 60 s (`httpx` timeouts), each failing the request or job without degradation; the Anthropic client uses SDK default timeouts.
 
 | Hop | Timeout | On expiry |
 | --- | --- | --- |
@@ -732,11 +773,11 @@ Prices live in a **versioned table**, not in code constants. Historical rows kee
 
 ### 13.2 Retries
 
-`tenacity` with exponential backoff plus full jitter. Retry only idempotent operations and only on 408/409/429/5xx and connection errors. Max 3 attempts. The Anthropic SDK's own `max_retries` is set explicitly rather than left at the default, so total wall-clock is bounded and predictable.
+**Current:** Anthropic calls retry with `tenacity` (exponential backoff with jitter, max 3 attempts) on connection errors, timeouts, rate limits, and 5xx; 4xx errors are not retried. Evaluation runs retry as Celery tasks. *Proposed:* the same policy for every idempotent dependency call, and an explicit Anthropic SDK `max_retries` so total wall-clock is bounded (today the SDK default applies in addition to `tenacity`).
 
 ### 13.3 Circuit breakers
 
-One breaker per dependency (`inference`, `anthropic`, `postgres`). Opens after 5 consecutive failures or a 50% failure rate over 20 requests; half-opens after 30 s. An open breaker maps to a documented degraded mode rather than an error.
+*Proposed; not implemented.* One breaker per dependency (`inference`, `anthropic`, `postgres`). Opens after 5 consecutive failures or a 50% failure rate over 20 requests; half-opens after 30 s. An open breaker maps to a documented degraded mode rather than an error.
 
 ### 13.4 Degradation ladder
 
@@ -748,25 +789,26 @@ One breaker per dependency (`inference`, `anthropic`, `postgres`). Opens after 5
 | All generation unavailable | Extractive answer: return the top-ranked passages verbatim with citations, no synthesis | "Showing source passages — synthesis unavailable" |
 | Postgres unavailable | Hard fail | 503 with `Retry-After` |
 
-> **Implementation status (2026-07-25): the embedding-service row above is still a
-> target, not current behavior.** The default `hybrid_rrf` path calls query embedding
-> before lexical retrieval and raises `InferenceUnavailable` when inference cannot be
-> reached. In the SSE chat route this currently happens after the streaming response
-> has started, so Starlette cannot send the registered problem response and raises
-> `Caught handled exception, but response already started.` GitHub Actions reproduced
-> this in [E-005](../execution/test_evidence.md); see
-> [R-059 and R-060](../execution/review_notes.md).
+> **Implementation status (2026-09-27).** Only the "All generation unavailable" row is
+> implemented. Reranker or embedding failure raises `InferenceUnavailable`; the chat route
+> now resolves retrieval before the stream opens, so the client receives a
+> `503 retrieval-unavailable` problem response rather than a broken stream (the earlier
+> defect is recorded in [E-005](../execution/test_evidence.md) and
+> [R-059 and R-060](../execution/review_notes.md)). Lexical-only and RRF-order degradation,
+> the Sonnet tier, and `Retry-After` on a Postgres failure are proposed.
 
 ### 13.5 LLM-specific handling
 
 - **`stop_reason` is checked before reading `content`.** A `refusal` returns HTTP 200 with empty or partial content; code that indexes `content[0]` unconditionally will break.
-- **Server-side fallbacks** are enabled by default: `fallbacks: "default"` with beta header `server-side-fallback-2026-07-01`. A safety refusal is then re-served by Anthropic's recommended fallback model inside the same call, rather than surfacing as a failure.
-- **`pause_turn`** is handled in the tool loop by re-sending the conversation, capped at 3 continuations.
+- *Proposed:* **server-side fallbacks** enabled by default: `fallbacks: "default"` with beta header `server-side-fallback-2026-07-01`. A safety refusal is then re-served by Anthropic's recommended fallback model inside the same call, rather than surfacing as a failure.
+- *Proposed with tools:* **`pause_turn`** is handled in the tool loop by re-sending the conversation, capped at 3 continuations.
 - **Adaptive thinking is on by default** on `claude-opus-5`, and `max_tokens` caps thinking *plus* answer. Budgets are sized for both.
 
 ## 14. Data Model
 
-Twenty-one tables. Every tenant-scoped table has `tenant_id uuid NOT NULL`, RLS enabled, and `created_at` / `updated_at`.
+> **Status: Implemented.** Columns listed are the key ones; the SQLAlchemy models in `packages/db/src/db/models.py` are the complete reference.
+
+Twenty-four tables. Every tenant-scoped table has `tenant_id uuid NOT NULL`, RLS enabled, and `created_at` / `updated_at`.
 
 ### 14.1 Identity & tenancy
 
@@ -802,19 +844,19 @@ Twenty-one tables. Every tenant-scoped table has `tenant_id uuid NOT NULL`, RLS 
 | `queries` | `id`, `tenant_id`, `user_id`, `question`, `language`, `strategy`, `as_of`, `retrieved_chunk_ids uuid[]`, `rerank_scores real[]`, `answer_text`, `groundedness_verdict`, `citation_coverage`, `latency_ms`, `model`, `prompt_hash`, `acl_version` | The audit record. `acl_version` is the effective permission version used for this retrieval (§ 5.3). |
 | `query_citations` | `id`, `query_id`, `chunk_id`, `document_version_id`, `cited_text`, `start_char`, `end_char`, `answer_sentence_idx` | Maps native citations back to sources |
 | `feedback` | `id`, `query_id`, `user_id`, `rating`, `reason_code`, `comment` | Feeds the eval corpus |
-| `ingestion_jobs` | `id`, `tenant_id`, `document_version_id`, `stage`, `status`, `attempts`, `error`, `started_at`, `finished_at` | Stages: `download`, `parse`, `ocr`, `chunk`, `embed`, `index` |
-| `cost_ledger` | `id`, `tenant_id`, `query_id`, `purpose`, `model`, `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `latency_ms`, `computed_cost_usd`, `price_table_version` | One row per LLM call |
-| `model_prices` | `version`, `model`, `input_usd_per_mtok`, `output_usd_per_mtok`, `cache_read_multiplier`, `cache_write_multiplier`, `effective_from` | Versioned pricing |
-| `erasure_log` | `id`, `tenant_id`, `document_id`, `actor_user_id`, `reason`, `legal_basis`, `versions_affected`, `citations_affected`, `created_at` | Append-only. Survives the erasure it records (§ 6.4). |
+| `ingestion_jobs` | `id`, `tenant_id`, `document_version_id`, `stage`, `status`, `attempts`, `error`, `started_at`, `finished_at` | Stages: `download`, `parse`, `chunk`, `embed`, `index` (`ocr` is defined but not implemented) |
+| `cost_ledger` | `id`, `tenant_id`, `query_id`, `eval_run_id`, `eval_item_id`, `purpose`, `model`, `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `latency_ms`, `computed_cost_usd`, `reported_cost_usd`, `status`, `error_detail`, `price_table_version` | One row per LLM call |
+| `model_prices` | `version`, `model`, `input_usd_per_mtok`, `output_usd_per_mtok`, `cache_read_multiplier`, `cache_write_multiplier`, `effective_from` | Versioned pricing. Not read by cost code yet (§ 12.1) |
+| `erasure_log` | `id`, `tenant_id`, `document_id`, `actor_user_id`, `reason`, `legal_basis`, `versions_affected`, `citations_affected`, `queries_affected`, `objects_failed`, `failed_storage_keys`, `created_at` | Append-only. Survives the erasure it records (§ 6.4). |
 
 ### 14.5 Evaluation
 
 | Table | Key columns |
 | --- | --- |
-| `eval_datasets` | `id`, `tenant_id`, `name`, `version`, `slice` |
-| `eval_items` | `id`, `dataset_id`, `question`, `expected_facts jsonb`, `gold_chunk_ids uuid[]`, `as_of`, `acting_user_id`, `should_abstain` |
-| `eval_runs` | `id`, `dataset_id`, `strategy`, `embedding_model`, `reranker`, `generator_model`, `params jsonb`, `judge_prompt_hash`, `started_at`, `finished_at`, `git_sha` |
-| `eval_results` | `id`, `run_id`, `item_id`, `retrieved_chunk_ids uuid[]`, `metrics jsonb`, `answer_text`, `verdict`, `cost_usd` |
+| `eval_datasets` | `id`, `tenant_id`, `name`, `version`, `slice`, `content_sha256` |
+| `eval_items` | `id`, `tenant_id`, `dataset_id`, `external_id`, `slice`, `language`, `question`, `expected_facts jsonb`, `gold_chunk_ids uuid[]`, `gold_chunk_labels`, `must_exclude_chunk_ids`, `must_exclude_chunk_labels`, `as_of`, `acting_user_id`, `should_abstain` |
+| `eval_runs` | `id`, `tenant_id`, `dataset_id`, `strategy`, `embedding_model`, `reranker`, `generator_model`, `params jsonb` (also holds run status and progress), `judge_prompt_hash`, `started_at`, `finished_at`, `git_sha` |
+| `eval_results` | `id`, `tenant_id`, `run_id`, `item_id`, `retrieved_chunk_ids uuid[]`, `metrics jsonb`, `answer_text`, `citations`, `verdict`, `cost_usd` |
 | `eval_source_labels` | `tenant_id`, `label`, `document_version_id`: the offline corpus binding from a dataset's symbolic source label to a version. Primary key `(tenant_id, label)`; RLS like every tenant table ([ADR-016](#adr-016--the-evaluation-runtime-is-a-package-evals-is-offline-tooling)) |
 
 ### 14.6 Key indexes
@@ -864,6 +906,8 @@ so the plan degrades to sorting the whole partition on every page. See
 
 **Revisit if:** the strategy comparison shows the lexical arm is the bottleneck, or a tenant needs analyzers Postgres cannot express. The `KeywordSearch` interface exists precisely so OpenSearch can be added as an implementation without touching the fusion or ACL layers.
 
+*Correction (2026-09-27):* no `KeywordSearch` interface exists in code; the lexical arm is `retrieval.lexical`. Fusion also does not run in one SQL statement — the arms are fused in Python (§ 7.6).
+
 ### ADR-004 — Self-hosted BGE-M3 embeddings
 
 **Decision:** BGE-M3 in a self-hosted `inference` service.
@@ -871,6 +915,8 @@ so the plan degrades to sorting the whole partition on every page. See
 **Why:** Anthropic ships no embeddings endpoint, so an embedding provider must be chosen regardless. BGE-M3 is strong on Portuguese and English, gives 8k context, emits dense and sparse vectors in one pass, costs nothing per token, keeps document content inside our own infrastructure (a real requirement for the target industries), and removes a vendor from the critical path.
 
 **Cost accepted:** ~2.5 GB of model weights to host, slower than a hosted API on CPU, and one more service to operate. The `EmbeddingProvider` HTTP contract makes swapping to Voyage or OpenAI a contained change.
+
+*Correction (2026-09-27):* the swap boundary is the inference HTTP contract (§ 3.2) and the `InferenceBackend` protocol in `apps/inference`; there is no `EmbeddingProvider` type.
 
 ### ADR-005 — Native Anthropic citations
 
@@ -922,6 +968,8 @@ The common failure is not that the stubs were inaccurate. It is that **nothing l
 
 **Cost accepted:** the dense arm contributes no semantic signal until real weights land, so current recall is carried almost entirely by the lexical arm. That is visible in the eval output, which is the point.
 
+*Update (2026-09-27):* real weights are now the default backend (§ 3.2); the stub runs only in CI and `make test-integration`, so the cost above applies to deterministic evaluation evidence, not to the default runtime.
+
 ### ADR-010 — Thresholds compare normalized values, never raw scores
 
 **Decision:** Any threshold applied to a retrieval score first normalizes that score onto a documented 0–1 scale for the strategy that produced it. Raw scores from different strategies are never compared to a shared constant.
@@ -966,7 +1014,7 @@ This rule governs the **degraded** path only, and the degraded path is now narro
 
 **Why:** the alternative — a public SPA client holding tokens in `localStorage` or in memory — makes every XSS a credential-exfiltration bug and puts refresh-token rotation in the browser. It also produced a worse interim state: before this existed there was no configuration that was both functional and safe (R-072). `NEXT_PUBLIC_DEV_AUTH=false` sent no credentials and 401'd everywhere; `true` shipped a user-impersonation dropdown. A demo path that is unsafe and a safe path that is broken is not a choice between two options.
 
-**Concretely:** `src/lib/auth/server.ts` is `server-only` and holds the metadata fetch, the PKCE verifier, `state` validation with `timingSafeEqual`, and refresh rotation. The five routes under `src/app/api/auth/` are login, callback, session, logout and locale. `safeReturnTo` rejects any `return_to` that is not a same-site absolute path, so the callback cannot be turned into an open redirect. `OIDC_INTERNAL_BASE_URL` exists because the browser and the Next.js server reach Keycloak on different hostnames under Compose; it is applied only to URLs whose origin matches the configured issuer, so it cannot be used to redirect token requests to an arbitrary host.
+**Concretely:** `src/lib/auth/server.ts` is `server-only` and holds the metadata fetch, the PKCE verifier, `state` validation with `timingSafeEqual`, and refresh rotation. The four routes under `src/app/api/auth/` are login, callback, session and logout; the locale route is `src/app/api/locale/`. `safeReturnTo` rejects any `return_to` that is not a same-site absolute path, so the callback cannot be turned into an open redirect. `OIDC_INTERNAL_BASE_URL` exists because the browser and the Next.js server reach Keycloak on different hostnames under Compose; it is applied only to URLs whose origin matches the configured issuer, so it cannot be used to redirect token requests to an arbitrary host.
 
 **Retained:** `DEV_AUTH_BYPASS` still exists for header-based impersonation, now strictly opt-in on both sides (`DEV_AUTH_BYPASS=true` **and** `NEXT_PUBLIC_DEV_AUTH=true`) and no longer the default in `.env.example`.
 
@@ -976,15 +1024,21 @@ This rule governs the **degraded** path only, and the degraded path is now narro
 
 **Why:** offset pagination is wrong twice over on this data. It rescans and discards N rows per page, and under concurrent writes — which is the normal state of a listing whose rows are created by ingest — a row inserted before the current page shifts every subsequent page by one, so a client walking to the end silently skips rows. `(created_at, id)` is unique and immutable, so a seek resumes exactly where it stopped regardless of what was written in between.
 
-**Why opaque, specifically:** the encoding is a private detail and clients must treat the string as a token. A readable cursor becomes a parameter clients construct, and then the tie-breaker column cannot be changed without breaking them. Decoding validates length, base64 alphabet and UUID shape, and a malformed cursor is a 400 `validation-error` — never a silently ignored parameter, which would return page one and look like data loss to the caller.
+**Why opaque, specifically:** the encoding is a private detail and clients must treat the string as a token. A readable cursor becomes a parameter clients construct, and then the tie-breaker column cannot be changed without breaking them. Decoding validates length, base64 alphabet and UUID shape, and a malformed cursor is a `422 validation-failed` (corrected 2026-09-27; originally recorded as 400) — never a silently ignored parameter, which would return page one and look like data loss to the caller.
 
-**Concretely:** `apps/api/src/api/pagination.py` holds `encode_cursor`, `decode_cursor`, `apply_descending_cursor` and `page_rows`. `page_rows` fetches `limit + 1` rows to decide whether a further page exists without a second count query; `next_cursor` is `null` on the last page. `limit` is clamped to `[1, 200]`. Each endpoint's ordering is backed by a matching composite index (§ 14.6).
+**Concretely:** `apps/api/src/api/pagination.py` holds `encode_cursor`, `decode_cursor`, `apply_descending_cursor` and `page_rows`. `page_rows` fetches `limit + 1` rows to decide whether a further page exists without a second count query; `next_cursor` is `null` on the last page. `limit` above 200 is clamped to 200; `limit` below 1 is rejected with 422. Each endpoint's ordering is backed by a matching composite index (§ 14.6).
 
 ### ADR-015 — Fixed-token remains the production chunking default
 
 **Decision:** Keep `fixed_token` as the production default and retain
 `section_aware` as an explicit opt-in experiment. The worker and corpus loader
 continue to accept `CHUNKING_STRATEGY=section_aware` for controlled validation.
+
+**Strategies as implemented** (`apps/worker/src/worker/pipeline/chunk.py`): both split
+the parsed text into heading sections first. `fixed_token` then cuts each section into
+overlapping fixed-size windows; `section_aware` groups whole paragraphs within a section
+and falls back to overlapping windows only for a paragraph that exceeds the size limit.
+"Tokens" are whitespace-word estimates, not model tokens.
 
 **Evidence:** T-408 ran both variants against the same immutable 320-item,
 eight-slice dataset (`content_sha256=a6bbd5c2b34682d90600f4930c4a52ba826716002d52bfe6d6c36754b8b29a6f`)
@@ -1054,13 +1108,13 @@ enterprise-rag/
 │   │   ├── src/api/
 │   │   │   ├── routers/        # HTTP layer only — no business logic
 │   │   │   ├── deps/           # auth, tenant context, db session
-│   │   │   ├── services/       # retrieval, generation, groundedness, cost
+│   │   │   ├── services/       # chat orchestration, inline ingest, storage, problem helpers
 │   │   │   └── main.py
 │   │   └── tests/
 │   ├── worker/                 # Celery
 │   │   ├── src/worker/
-│   │   │   ├── tasks/          # ingest, reindex, freshness, eval
-│   │   │   └── pipeline/       # parse, ocr, chunk, embed, index
+│   │   │   ├── tasks/          # ingest, eval, noop
+│   │   │   └── pipeline/       # parse, chunk, embed, index
 │   │   └── tests/
 │   ├── inference/              # BGE-M3 + BGE-reranker-v2-m3
 │   │   ├── src/inference/
@@ -1085,35 +1139,38 @@ enterprise-rag/
 │   ├── domain/                 # entities, value objects, no I/O
 │   ├── db/                     # SQLAlchemy models, Alembic migrations
 │   ├── retrieval/              # strategies, fusion, ACL predicate builder
-│   ├── llm/                    # Anthropic client wrapper, prompts, cost, judges/ rubric data
+│   ├── llm/                    # Anthropic client, model registry and prices, groundedness, judges/ rubric data
 │   ├── evaluation/             # eval runtime: metrics, comparison report, source labels (ADR-016)
-│   └── observability/          # logging, tracing, metrics
+│   └── observability/          # structured logging
 ├── evals/                      # offline tooling only; never imported by product code (ADR-016)
 │   ├── corpus.json             # gold label → fixture / collection / version manifest
+│   ├── corpus_*.json · build_*.py  # additional corpus manifests and their generators
 │   ├── baselines/              # committed CI gate baselines
 │   ├── datasets/               # golden set, versioned
 │   ├── fixtures/               # synthetic bilingual corpus
 │   └── harness/
 │       ├── corpus.py           # ingests fixtures via the worker pipeline; binds labels
 │       ├── compare.py · ci.py · gate.py  # sweep runner, CI flow, regression gate
-│       ├── metrics.py          # golden dataset loader
+│       ├── chunking.py         # chunking experiment runner (T-408)
+│       ├── dataset.py · manifest.py · metrics.py  # dataset validation, manifests, loader
+│       ├── test_*.py           # harness tests, co-located
 │       └── run.py              # live retrieval runner (§ 11.1)
 ├── infra/
 │   ├── compose/                # docker-compose.yml + service Dockerfiles
 │   │   └── keycloak/           # enterprise-rag realm, imported at start
-│   └── terraform/              # AWS modules
+│   └── terraform/              # placeholder only (.gitkeep); see § 17.2
 ├── scripts/
 │   └── run-integration-tests.sh  # disposable test database (§ testing.md § 11)
 ├── docs/                       # this directory
-├── tests/                      # cross-service integration + e2e
+├── tests/                      # disposable integration-database helper and its tests
 └── .github/workflows/
 ```
 
-**Dependency rules** (enforced by `import-linter`, see [conventions.md](../standards/conventions.md#4-module-boundaries)):
+**Dependency rules** (the enforced subset is listed in [conventions.md](../standards/conventions.md#4-module-boundaries)):
 
 - `packages/domain` imports nothing from the project.
 - `apps/*` may import `packages/*`; `packages/*` may never import `apps/*`.
-- `apps/api` may not import `apps/worker` internals, and vice versa. Shared logic moves to `packages/`.
+- `apps/api` may not import `apps/worker` internals, and vice versa. Shared logic moves to `packages/`. One declared exception: `api.services.ingest` imports `worker.tasks.ingest` for the inline-ingest fallback.
 - No module under `apps/*` or `packages/*` imports `evals/`. Evaluation code that the API or worker runs belongs in `packages/evaluation`, which may import only `domain` and `db` ([ADR-016](#adr-016--the-evaluation-runtime-is-a-package-evals-is-offline-tooling)).
 - `apps/web` talks to `apps/api` over HTTP only.
 
@@ -1146,8 +1203,9 @@ the host. It is documented so the choice is explicit, not so it is convenient.
 groups, roles, collections, and ACLs. It does not load document content. Follow
 the [first-upload verification](../guides/local-development.md#verify-an-upload)
 or load the evaluation fixtures separately. The Keycloak realm and database seed
-share stable tenant UUIDs. For a disposable database created before that mapping,
-`make db-reset` rebuilds the database and seed; it deletes all existing development data.
+share stable tenant UUIDs; the seed remaps an older tenant ID to the stable value.
+Reset and cleanup commands are in the
+[local-development guide](../guides/local-development.md#reset-and-clean-up).
 
 ### 17.2 Cloud — AWS
 
@@ -1187,8 +1245,9 @@ environments; their existence and configuration have not been verified.
 ### 17.4 Release
 
 **Implemented:** [CI](../../.github/workflows/ci.yml) runs independent lint,
-typecheck/contract/build, unit, frontend, database integration, and container-build
-jobs. It does not publish images or deploy to staging or production. See the
+typecheck/contract/build, unit, frontend, database integration, container-build, and
+deterministic `eval-smoke` jobs; [eval-full](../../.github/workflows/eval-full.yml) runs
+nightly. It does not publish images or deploy to staging or production. See the
 [CI status table](../standards/testing.md#12-ci-pipeline).
 
 **Proposed release process:** publish immutable images, deploy staging after merge,
