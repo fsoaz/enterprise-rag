@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
+from typing import Annotated
 from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from fastapi import Depends
 from fastapi.testclient import TestClient
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from tests.integration_database import integration_database_urls
 
-from api.deps.auth import reset_auth_caches
+from api.deps.auth import AuthUser, get_current_user, reset_auth_caches
+from api.deps.db import get_db_session
 from api.settings import clear_settings_cache
 from db.session import reset_engine
 
@@ -390,4 +393,60 @@ def test_create_run__dispatch__sees_committed_run_and_persists_outcome(
         if publication_fails:
             assert params["error"] == response.json()["error"] == "publication unavailable"
     finally:
+        asyncio.run(_purge([name]))
+
+
+def test_register_dataset__before_dependency_cleanup__visible_to_other_connections(
+    client: TestClient,
+) -> None:
+    from api.main import app
+
+    name = f"t413-{uuid4().hex}"
+    observed = False
+
+    async def observed_session(
+        user: Annotated[AuthUser, Depends(get_current_user)],
+    ) -> AsyncIterator[AsyncSession]:
+        nonlocal observed
+        async for session in get_db_session(user):
+            yield session
+            # Check before get_db_session resumes and performs its cleanup commit.
+            app_url, _ = integration_database_urls()
+            with (
+                psycopg.connect(app_url.replace("+asyncpg", "")) as connection,
+                connection.cursor() as cursor,
+            ):
+                cursor.execute(
+                    "SELECT set_config('app.current_tenant', %s, true)",
+                    (str(user.tenant_id),),
+                )
+                cursor.execute(
+                    "SELECT count(*) FROM eval_items i JOIN eval_datasets d "
+                    "ON d.id = i.dataset_id WHERE d.name = %s",
+                    (name,),
+                )
+                assert cursor.fetchone() == (1,)
+                observed = True
+
+    app.dependency_overrides[get_db_session] = observed_session
+    try:
+        created = client.post(
+            "/api/v1/evals/datasets",
+            headers={"X-Dev-User": "acme-admin"},
+            json={
+                "name": name,
+                "version": "1",
+                "items": [{"question": "Unknown?", "should_abstain": True}],
+            },
+        )
+        assert created.status_code == 201, created.text
+        assert observed
+        app.dependency_overrides.pop(get_db_session)
+        hidden = client.get(
+            f"/api/v1/evals/datasets/{created.json()['id']}/items",
+            headers={"X-Dev-User": "globex-admin"},
+        )
+        assert hidden.status_code == 404
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
         asyncio.run(_purge([name]))

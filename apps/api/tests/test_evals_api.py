@@ -16,6 +16,7 @@ from api.routers.evals import (
     RunCreate,
     _dataset_content_sha256,
     create_run,
+    register_dataset,
 )
 from db.models import EvalDataset
 
@@ -92,3 +93,26 @@ async def test_create_run__commit_failure__prevents_dispatch(
         )
     session.commit.assert_awaited_once()
     dispatch.assert_not_called()
+
+
+async def test_register_dataset__commit_failure__does_not_return_success() -> None:
+    session = AsyncMock(spec=AsyncSession)
+    session.commit.side_effect = RuntimeError("commit failed")
+    with pytest.raises(RuntimeError, match="commit failed"):
+        await register_dataset(
+            DatasetCreate(
+                name="smoke",
+                version="1",
+                items=[EvalItemIn(question="Unknown?", should_abstain=True)],
+            ),
+            AuthUser(
+                user_id=uuid4(),
+                tenant_id=uuid4(),
+                external_subject="admin",
+                email="admin@example.test",
+                roles=("admin",),
+                groups=(),
+            ),
+            session,
+        )
+    session.commit.assert_awaited_once()
