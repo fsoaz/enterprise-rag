@@ -7,6 +7,9 @@
 
 ## Active
 
+T-413 — evaluation registration commit race: done locally on PR #5 branch;
+AGENTS.md preserved. Hosted CI pending; see E-018. See [task](../tasks/T-413-evaluation-registration-commit.md).
+
 | Field | Value |
 | --- | --- |
 | Task | T-412 — Correct developer documentation against the implementation |

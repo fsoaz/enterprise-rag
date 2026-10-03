@@ -773,3 +773,11 @@ upload walkthrough were not executed in this documentation pass. The Docker CLI
 is unavailable here. Hosted branch protection, external scanning, and any cloud
 infrastructure outside this repository remain unverified. Earlier historical
 execution entries above retain their original scope and evidence.
+
+
+### 2026-10-03 — T-413: fix PR #5 evaluation registration race
+
+Preserved AGENTS.md and committed dataset/items before returning registration
+success. Added pre-cleanup RLS visibility and commit-failure regressions.
+Local unit/integration checks and unchanged deterministic smoke gate pass; E-018.
+No schema, baseline, dependencies, or authorization changes. Hosted CI pending.

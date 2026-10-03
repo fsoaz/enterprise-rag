@@ -964,3 +964,31 @@ Alembic through `0005_eval_execution`, and seeded the database before testing.
 This provides disposable database evidence for migrations, registration, runs,
 progress, result/error API responses, pagination, comparison, authorization,
 and tenant isolation. T-405 is complete.
+
+
+## E-018 — T-413 evaluation dataset registration race (2026-10-03)
+
+PR #5 CI run 37084904321 returned 404 on run creation immediately after dataset
+registration. Registration now commits the dataset and items before returning 201.
+AGENTS.md is unchanged from ec337a3. No schema, baseline, or auth-policy changes.
+
+- `make lint typecheck`: passed (Ruff, Biome, mypy, seven import contracts, tsc).
+- `make test`: 170 passed, 1 skipped, 26 deselected. Initial sandbox run stalled
+  and was interrupted; the unrestricted rerun passed.
+- Evaluation integration tests: 6 passed, including separate RLS connection
+  visibility before dependency cleanup and another tenant's denied read.
+- Full integration suite against a freshly migrated/seeded disposable PostgreSQL
+  16 + pgvector database, Redis, and stub inference: 24 passed, 2 skipped,
+  171 deselected. Used the repository test-database URL guard; Docker is unavailable,
+  so services were provisioned with Podman rather than `make test-integration`.
+- Mutation: restoring the original final flush makes the new integration test fail
+  with `(0,) != (1,)`; fixed implementation restored immediately.
+- Exact `evals.harness.ci --mode smoke` and `evals.harness.gate` against unchanged
+  `evals/baselines/t407-smoke.json`: passed, no violations, zero tenant leakage
+  and ACL bypass across four runs. Evidence at /tmp/t413-eval-{smoke,gate}.json.
+  Deterministic evidence only; no paid models or live semantic-quality claims.
+- `make openapi openapi-check`, frontend API type generation: passed, no artifact diff.
+- `git diff --check`: passed.
+
+No frontend behavior or migration changed; no additional frontend coverage/build
+or container rebuild was needed. Hosted CI pending publication of the fix.

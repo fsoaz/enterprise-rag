@@ -340,7 +340,9 @@ async def register_dataset(
                 should_abstain=item.should_abstain,
             )
         )
-    await session.flush()
+    # Dependency cleanup may run after a client starts its next request.
+    # Publish the dataset ID only once its items are visible on other connections.
+    await session.commit()
     return DatasetOut(
         id=dataset.id,
         name=dataset.name,
