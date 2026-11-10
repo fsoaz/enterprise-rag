@@ -585,3 +585,20 @@ Before reporting completion:
 8. Regenerate committed contract artifacts when required.
 9. Update architecture, ADRs, standards, task, or execution documentation when behavior changes.
 10. Report exactly what was executed, what failed, what was blocked, and what remains unverified.
+
+## Agent Execution Protocol
+
+1. Read the active task and its acceptance criteria.
+2. Inspect the relevant code, tests, ADRs, and working tree.
+3. Identify affected security, retrieval, citation, and evaluation invariants.
+4. Confirm the scope and identify actions requiring authorization.
+5. Implement the smallest complete change.
+6. Add positive and negative regression tests.
+7. Execute relevant validation commands.
+8. Review the final diff and report verification evidence.
+
+Never expand task scope or perform restricted operations
+without authorization.
+
+Follow docs/standards/ai_agent_rules.md for detailed
+agent permissions and task lifecycle requirements.
