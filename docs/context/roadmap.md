@@ -224,9 +224,11 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
   320 validated items (40 per slice).
 - [x] The strategy comparison produces a matrix with per-slice deltas — T-406 comparison runner/API report includes paired coverage, deltas, and significance
 - [ ] `hybrid_rerank` is demonstrably the best default, with numbers — recorded comparisons ran on the deterministic stub, which cannot beat RRF ([ADR-009](./architecture.md#adr-009--a-stub-degrades-to-a-no-op-never-to-a-wrong-signal)); a real-weights comparison is still needed
-- [ ] A deliberate retrieval regression is caught by the PR gate — T-407 implements the
-  deterministic `eval-smoke` gate and its regression tests; hosted GitHub Actions evidence
-  is still pending before R-031 can be closed
+- [ ] A deliberate retrieval regression is caught by the PR gate — T-407's hosted
+  smoke comparison and threshold enforcement are verified at `6b3e2c5` and `353820d`
+  ([E-019](../execution/test_evidence.md#e-019--milestone-a-validation-and-github-reconciliation-2026-11-09)); R-031 is resolved.
+  Unit coverage injects degraded metric reports; a hosted end-to-end retrieval mutation
+  has not been verified, so this broader exit criterion remains open.
 - [x] Cross-tenant leakage and ACL bypass both measure **0** on the `permission` slice — `acme-viewer` retrieves only the restricted document, `acme-member` retrieves everything except it
 - [ ] Injection success rate ≤ 1% on the `injection` slice — not measurable without a real `ANTHROPIC_API_KEY`; retrieval on that slice is scored, generation is not
 - [x] Q-1 is decided and recorded as [ADR-015](./architecture.md#adr-015--fixed-token-remains-the-production-chunking-default); Q-2 remains open for T-409

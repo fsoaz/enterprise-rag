@@ -7,49 +7,45 @@
 
 ## Active
 
-T-413 — evaluation registration commit race: done locally on PR #5 branch;
-AGENTS.md preserved. Hosted CI pending; see E-018. See [task](../tasks/T-413-evaluation-registration-commit.md).
+No implementation task is in progress. Validation/GitHub reconciliation completed
+2026-11-09 against local HEAD and GitHub `main` at `353820d`.
+See [E-019](./test_evidence.md#e-019--milestone-a-validation-and-github-reconciliation-2026-11-09).
 
-| Field | Value |
-| --- | --- |
-| Task | T-412 — Correct developer documentation against the implementation |
-| File | [T-412-documentation-accuracy-audit.md](../tasks/T-412-documentation-accuracy-audit.md) |
-| Status | done — local edits and verification complete ([E-017](./test_evidence.md)); not yet committed |
-| Branch | docs/T-412-documentation-accuracy-audit |
-| Started | 2026-09-27 |
-| Base | T-411 (`78c5ead`) |
+T-413 is merged through [PR #5](https://github.com/fsoaz/enterprise-rag/pull/5):
+fix `6b3e2c5`, merge `353820d`. Its PR CI run
+[37093710003](https://github.com/fsoaz/enterprise-rag/actions/runs/37093710003)
+passed the production-path smoke comparison **and** regression-threshold step.
+Post-merge CI [37094247061](https://github.com/fsoaz/enterprise-rag/actions/runs/37094247061)
+also passed. T-407's hosted acceptance criterion is met; R-031 is resolved.
+T-410/T-411 and T-412 documentation edits are also merged; earlier statements that
+they were only local or uncommitted are superseded. T-412's guide walkthrough
+acceptance criterion remains unverified; CI does not exercise that walkthrough.
 
-T-411 — Bound evaluation complexity after T-410 — is done locally
-([E-016](./test_evidence.md)); hosted CI remains pending.
+Scheduled full evaluation
+[42611175399](https://github.com/fsoaz/enterprise-rag/actions/runs/42611175399)
+passed on the same `main` SHA on 2026-11-09. This is deterministic stub evidence.
+The scheduled workflow does not invoke `evals.harness.gate`; its success is not the
+basis for closing R-031 or a claim of live-model quality.
 
-T-410 resolves R-124 before the T-405→T-408 stack merges into `main`, which is the
-baseline and does not contain the coupling.
-
-Milestone A remains incomplete. The July 31 QA report records 21 defects fixed,
-two intentional behaviors, and one fixed regression. Those fixes are committed;
-the July 27 handoff's uncommitted-tree statement was stale. Historical evidence
-remains in the QA reports and evidence log. No new CI run has been confirmed.
-Live generation, judging, cost, and current retrieval quality remain unmeasured.
-
-R-070, R-030, T-401, T-402, T-403, T-404, T-405, and T-406 are implemented locally on
-stacked task branches. T-407's workflow and deterministic gate are implemented;
-R-031 remains open until GitHub Actions runs the smoke job successfully. T-408's
-chunking experiment is complete and its fixed-token default decision is recorded
-in ADR-015. T-410 (`b6e68c1`) and T-411 (`78c5ead`) are committed separately on top
-of that stack, with local evidence in E-015 and E-016. Remaining sequence: define and
-implement T-409, then release demonstration.
-The T-408 full eight-slice evaluation is complete. Paid generation, judging, and expansion
-share a cumulative US$25 ceiling; no recurring nightly spend is authorized.
-Use disposable databases and keep deterministic and real-model evidence separate.
-
-R-058's mutable `0001_initial` remains a separate migration-history concern.
-Do not rewrite released migrations as part of this work. Release readiness requires
-all exit criteria to have measured evidence; unmet criteria remain blockers.
+Milestone A remains incomplete. Real-weights strategy comparison, live generation,
+judging, injection rate, latency/cost evidence, and outstanding roadmap exit
+criteria still need measurement. The deliberate-regression unit test exercises
+altered metric reports; a hosted end-to-end retrieval mutation has not been verified.
+R-058's mutable `0001_initial` and R-132's milestone scope conflict remain separate
+concerns. No migration history or milestone requirements were changed here.
 
 ## Next Task
 
-T-409 — sparse retrieval arm experiment (Q-2) is the next implementation task. Its
-task file should be created and marked `in_progress` before code changes begin.
+T-409 — sparse retrieval arm experiment (Q-2). **No hosted-CI dependency gate
+remains before starting it.** Before code changes, create its task file, define
+its experiment/acceptance criteria, and mark it `in_progress` here. It is not
+started by this reconciliation. T-408/ADR-015 retains fixed-token chunking.
+
+The historical experiment authorization caps paid generation, judging, and
+expansion cumulatively at US$25; no new paid run or recurring nightly spend is
+authorized by this reconciliation. Use disposable databases and keep deterministic
+and real-model evidence separate. Milestone exit validation remains a release gate,
+not evidence supplied by starting T-409.
 
 ---
 
@@ -65,13 +61,16 @@ task file should be created and marked `in_progress` before code changes begin.
 
 ## Target: Milestone A
 
+The phase labels below describe implementation coverage. Release completion still
+requires the measured exit criteria in [the roadmap](../context/roadmap.md).
+
 | Phase | Theme | Status |
 | --- | --- | --- |
 | 0 | Foundation | Done |
 | 1 | Ingestion & versioning (PDF/MD/TXT) | Done (sync ingest + pipeline) |
 | 2 | Retrieval core | Done |
 | 3 | Generation & citations | Done (live LLM optional; extractive fallback) |
-| 4 | Evaluation | Partial — T-401 through T-408, T-410, and T-411 implemented; hosted CI evidence (R-031), T-409, and later experiments outstanding |
+| 4 | Evaluation | Partial — T-401 through T-408, T-410, and T-411 implemented; hosted CI verified (E-019); T-409 and live validation outstanding |
 | 6a | Chat UI + minimal admin | Done — auth, multi-turn, PT/EN, admin document management, frontend tests |
 
 ---

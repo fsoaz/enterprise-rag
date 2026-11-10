@@ -992,3 +992,79 @@ AGENTS.md is unchanged from ec337a3. No schema, baseline, or auth-policy changes
 
 No frontend behavior or migration changed; no additional frontend coverage/build
 or container rebuild was needed. Hosted CI pending publication of the fix.
+
+## E-019 — Milestone A validation and GitHub reconciliation (2026-11-09)
+
+Read-only GitHub API inspection plus local source/commit inspection. Local HEAD
+and remote `main` both resolve to `353820d012d042eb0a22a25f45b6b09c8a764c7a`;
+the working tree was clean before these documentation edits. No workflow was
+triggered, no GitHub state was mutated, and no paid model was called.
+
+### Commit and hosted evidence
+
+| Evidence | Revision/event | Observed result |
+| --- | --- | --- |
+| [PR #5](https://github.com/fsoaz/enterprise-rag/pull/5) | Head `6b3e2c5280db906f1bd3371fe855e9dbd15230c0`; merged 2026-10-03 03:45:03 UTC as `353820d` | T-413 fix is merged, rather than awaiting publication |
+| [Original CI 37084904321](https://github.com/fsoaz/enterprise-rag/actions/runs/37084904321) | `ec337a3`, `pull_request` | Smoke comparison failed; threshold enforcement skipped. E-018 records the registration 404 cause. This run cannot establish a passed gate |
+| [Fixed PR CI 37093710003](https://github.com/fsoaz/enterprise-rag/actions/runs/37093710003) | `6b3e2c5`, `pull_request`, 2026-10-03 | All seven jobs successful. Checkout log confirms PR merge ref `dae5ef187abe6beb4187155508b997fb78a3d3bb`, merging this head into `4aa5b78` |
+| [PR smoke job 111119222055](https://github.com/fsoaz/enterprise-rag/actions/runs/37093710003/job/111119222055) | Same PR run | Both production-path smoke comparison and threshold enforcement succeeded. Decoded log reports `passed: true`, `violations: []`, baseline `hybrid_rrf`; checks recall@10, nDCG@10, tenant leakage and ACL bypass across four strategies |
+| [Post-merge CI 37094247061](https://github.com/fsoaz/enterprise-rag/actions/runs/37094247061) | `353820d`, `push`, 2026-10-03 | All seven jobs successful, including smoke job 111120792183 and its threshold step |
+| [Full evaluation 42611175399](https://github.com/fsoaz/enterprise-rag/actions/runs/42611175399) | `353820d`, `schedule`, 2026-11-09 | Full eight-slice comparison and report publication succeeded. Recent Nov 7/8 runs also succeeded; this workflow has no threshold-enforcement step |
+
+Inspected run jobs/steps and artifact metadata, plus decoded PR smoke, unit, and
+integration job logs. PR artifact `11263473377` is named
+`eval-smoke-dae5ef187abe6beb4187155508b997fb78a3d3bb` (the tested merge ref,
+not the PR head); post-merge smoke artifact is `11262763608`. Both are listed as
+unexpired with expiry 2027-01-01. Latest full artifact is `13669634227`, expiry
+2026-12-09. The PR ZIP download returned a file reference; its contents were not
+extracted or independently re-scored. Numeric gate conclusions above come from
+the decoded job log, not inferred artifact contents.
+
+Hosted PR unit command `uv run pytest -q -m "not integration"`: **170 passed,
+1 skipped, 26 deselected**. Hosted integration command
+`uv run pytest -q -m integration`: **23 passed, 3 skipped, 171 deselected**.
+These differ from E-018's local integration counts. Quiet hosted output does not
+identify skipped cases/reasons; do not claim every integration case ran. Migration
+upgrade/downgrade/upgrade, frontend coverage, Next build, contract drift, import
+boundaries, lint and container jobs/steps are successful in the run metadata;
+no new coverage percentages or timings are asserted here.
+
+### Acceptance reconciliation
+
+| Requirement | Match to implementation/evidence | Disposition |
+| --- | --- | --- |
+| T-413: registration commits before response, failures propagate | `6b3e2c5` changes the final route flush to awaited commit; `test_register_dataset__commit_failure__does_not_return_success` verifies failure propagation | Met; merged |
+| T-413: visibility before dependency cleanup and tenant denial | `test_register_dataset__before_dependency_cleanup__visible_to_other_connections` reads via a separate RLS connection before cleanup and issues another tenant's denied GET; E-018 records local integration and rollback mutation evidence | Met by recorded local evidence; hosted aggregate is corroboration, not per-case execution proof |
+| T-413: offline, integration and deterministic smoke checks | E-018 local results; fixed PR and post-merge smoke/threshold steps above; fresh focused checks below | Met within the deterministic scope |
+| T-407 / R-031: hosted PR smoke gate succeeds on the implementation | Run 37093710003 and job 111119222055 establish both comparison and enforcement at the fixed head | Met; T-407 done, R-031 resolved |
+| Phase 4: deliberate retrieval regression caught | `test_gate_detects_a_deliberate_quality_regression` injects a three-point metric drop; allowance tests cover both retrieval metrics | Unit evidence passes; no inspected hosted run deliberately mutates end-to-end retrieval. Broader roadmap criterion remains unverified |
+| Phase 4: real reranker beats RRF; injection success ≤1%; Q-2 decision | Scheduled and PR configurations use stub inference and a replacement Anthropic key | Unmet/unmeasured by this evidence; Q-2 belongs to T-409 |
+| Overall Milestone A exit | Requires a demonstrated Compose deployment with two tenants, bilingual cited answers, abstention and ledgered LLM calls; other phase criteria include real quality, latency, caching and startup measurements | Not established by green CI or nightlies; outstanding roadmap criteria and R-132 scope conflict remain |
+
+Current gate implementation enforces a maximum 0.02 drop in recall@10 and nDCG@10
+for `hybrid_rrf` against the committed compatible baseline, plus exact zero tenant
+leakage/ACL bypass in every strategy. T-411 made answer-quality metrics report-only.
+No baseline, thresholds, product behavior or milestone criteria were changed here.
+The branch API reports `main` as unprotected: successful checks establish execution,
+not a configured required merge check. No branch-protection change is implied.
+
+**Before T-409:** the hosted T-407/R-031 dependency is satisfied. The remaining
+start prerequisite is to create the T-409 task file with its experiment scope and
+acceptance criteria and mark it `in_progress` before code changes. Release exit
+validation remains separate. This reconciliation neither starts T-409 nor authorizes
+new paid evaluation.
+
+### Fresh local verification and limits
+
+- `.venv/bin/python -m pytest -q evals/harness/test_gate.py apps/api/tests/test_evals_api.py`:
+  **19 passed in 7.23s** (offline; includes deliberate report regression, both
+  retrieval allowances, security failure cases and commit failure propagation).
+- `make lint typecheck`: blocked at lint, `make: uv: No such file or directory`
+  (Error 127); typecheck did not execute.
+- `make test`: blocked by the same missing `uv` executable (Error 127).
+- Relative-link/heading-anchor check over all seven edited documents: **164 links,
+  0 errors**. `git diff --check`: **passed**.
+
+No fresh integration, frontend, container, migration or live evaluation run was
+performed for this documentation-only reconciliation. Historical and hosted test
+results above are explicitly attributed to their original revisions and runs.

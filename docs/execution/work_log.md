@@ -4,6 +4,23 @@
 > One entry per completed task. Never edit or delete a past entry; correct it with a new one that says what changed.
 > **Related:** [current_task.md](./current_task.md) · [test_evidence.md](./test_evidence.md) · [review_notes.md](./review_notes.md)
 
+## 2026-11-09 — Milestone A validation and GitHub reconciliation
+
+Matched T-413 and T-407/R-031 acceptance criteria to merged commits and fresh
+read-only GitHub observations. PR #5 fix `6b3e2c5` and merge `353820d` both have
+successful smoke comparison **and** threshold enforcement. Corrected current
+status and task/review records; R-031 is resolved. Kept broader milestone exit
+criteria open and distinguished unit report-mutation coverage from unverified
+end-to-end retrieval mutation evidence. T-409 remains unstarted; its hosted
+dependency is satisfied, and its task definition is required before code changes.
+
+[E-019](./test_evidence.md#e-019--milestone-a-validation-and-github-reconciliation-2026-11-09)
+records run/job/artifact identities, acceptance mapping, skipped-test limits and
+remaining milestone evidence. Fresh focused offline tests: 19 passed. Required
+Make lint/typecheck and test commands could not execute because `uv` is absent.
+Documentation relative links and `git diff --check` pass. No runtime, workflow,
+baseline, generated contract or GitHub state changed; no paid calls or new runs.
+
 ## 2026-09-27 — T-412 documentation accuracy audit
 
 User-requested AUDIT → EDIT of the developer documentation against the Makefile,

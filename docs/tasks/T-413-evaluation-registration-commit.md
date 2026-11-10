@@ -1,6 +1,6 @@
 # T-413 — Commit evaluation registration before responding
 
-Status: done (local verification; hosted CI pending). Branch: docs/T-412-documentation-accuracy-audit (user requested
+Status: done (merged; hosted CI verified in E-019). Branch: docs/T-412-documentation-accuracy-audit (user requested
 CI remediation alongside PR #5's preserved AGENTS.md changes).
 
 ## Goal
@@ -35,3 +35,12 @@ and the production-path deterministic smoke comparison and thresholds.
 ## Verification
 
 See E-018 in [test evidence](../execution/test_evidence.md).
+
+## Hosted reconciliation — 2026-11-09
+
+Fix `6b3e2c5` merged in PR #5 as `353820d`. PR CI run
+[37093710003](https://github.com/fsoaz/enterprise-rag/actions/runs/37093710003)
+passed all seven jobs, including the smoke comparison and threshold enforcement;
+post-merge run [37094247061](https://github.com/fsoaz/enterprise-rag/actions/runs/37094247061)
+also passed. E-018 remains historical local evidence; E-019 records the hosted
+results and their limits. No hosted validation remains pending for this fix.
