@@ -2,11 +2,22 @@
 
 **Enterprise RAG Document Intelligence System** — turn a static document repository into an interactive, cited knowledge layer with permission-aware retrieval.
 
-> **Status: Milestone A in progress** — live status in [current_task.md](docs/execution/current_task.md). Implemented: real OIDC sign-in, real BGE-M3 and BGE-reranker-v2-m3 weights, multi-turn chat, a PT/EN interface, keyset pagination, a tenant-scoped evaluation API with a deterministic CI gate, and a frontend test tier. CI and the integration-test helper select the deterministic inference backend for reproducible checks. Set `ANTHROPIC_API_KEY` for synthesized answers; without one the system abstains rather than guessing.
->
-> A security pass and QA remediation rounds closed the defects recorded in [review_notes.md](docs/execution/review_notes.md); see [work_log.md](docs/execution/work_log.md).
->
-> **Not yet measured:** answer quality, latency and cost against the live Anthropic API, which needs production credentials. The deterministic stub-backed eval gate runs on pull requests, pushes to `main`, and a nightly full run; the first hosted smoke result is still pending before [R-031](docs/execution/review_notes.md) can close.
+**Milestone A is in progress.** The system includes OIDC sign-in, BGE-M3
+embeddings and BGE reranking, multilingual chat with versioned citations, and a
+tenant-scoped evaluation API. [Current status](docs/execution/current_task.md)
+
+**Deterministic evaluation.** The hosted 48-item smoke job passed its retrieval
+regression, tenant leakage, and ACL bypass checks on the fix PR and on `main`.
+The scheduled 320-item comparison published its report on November 21, 2026,
+using stub inference and extractive fallback. The smoke job enforces thresholds.
+The scheduled workflow publishes the full comparison for review.
+[Hosted smoke evidence](docs/execution/test_evidence.md#e-019--milestone-a-validation-and-github-reconciliation-2026-11-09) ·
+[November 21 run](https://github.com/fsoaz/enterprise-rag/actions/runs/44898272585)
+
+**Live validation is still open.** The release needs real-weights retrieval
+results, live answer-quality and adversarial results, and latency and cost
+measurements under the documented workloads.
+[Evaluation guide](docs/guides/evaluation.md) · [Release criteria](docs/context/roadmap.md)
 
 ---
 
@@ -216,20 +227,10 @@ database forward, so it cannot see a conflict with a from-scratch build.
 
 ### Evals
 
-The harness scores real retrieval against the fixture corpus — it needs Postgres,
-a seeded tenant, and the inference service running:
-
-```bash
-uv run --no-sync --env-file .env python -m evals.harness.run --load-corpus   # ingest evals/fixtures, then score
-uv run --no-sync --env-file .env python -m evals.harness.run                 # score against the loaded corpus
-```
-
-Scores are only meaningful on a corpus you rebuilt with `--load-corpus`.
-`INFERENCE_BACKEND=stub` is only a deterministic wiring profile and its scores must not be
-published as semantic quality. Compose and the documented local command default to
-`INFERENCE_BACKEND=bge`; startup fails rather than silently falling back if the model extra
-or weights are unavailable. Current figures and their caveats:
-[test_evidence.md](docs/execution/test_evidence.md).
+Use the [local deterministic evaluation walkthrough](docs/guides/local-development.md#run-the-deterministic-evaluation-locally)
+to reproduce the smoke gate. Use the [evaluation guide](docs/guides/evaluation.md)
+to score retrieval with real BGE weights, run an approved live answer evaluation,
+and record measurements against the release targets.
 
 ## Configuration
 

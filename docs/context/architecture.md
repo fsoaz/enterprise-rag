@@ -710,20 +710,22 @@ a fixed seed. This is the sole comparison endpoint.
 | Nightly | Full dataset, all strategies | Reports to the dashboard; opens an issue on regression |
 | Pre-release | Full + security suite | Cross-tenant leakage and ACL bypass are hard zeroes |
 
-**Actual: the evaluation jobs are implemented; hosted-run evidence is pending (T-407).**
-The pull-request `eval-smoke` job runs the production API/worker path against disposable
-Postgres and Redis plus deterministic stub inference, selects 48 items across all eight
-slices, and gates recall@10 and nDCG@10 against the committed baseline with 0.02
-allowances. The smoke gate requires tenant leakage and ACL bypass of zero. The full run is report-only; T-408 recorded ACL bypass of 0.0125 in its injection slice, under investigation ([ADR-015](#adr-015--fixed-token-remains-the-production-chunking-default)). Faithfulness,
-citation precision, unsupported-answer rate, and correct-abstention rate are computed
-and reported but have no deterministic thresholds. The `eval-smoke` job runs on pull requests and pushes to `main`. The nightly `eval-full` workflow
-runs all 320 items and four configured retrieval strategies, retaining its report without
-paid model calls. The local baseline and focused gate tests are committed in
-`evals/baselines/` and `evals/harness/`.
+The `eval-smoke` job runs on pull requests and pushes to `main`. It exercises the
+API and worker against disposable Postgres and Redis with stub inference. It
+compares 48 items across eight slices, allowing a drop of up to 0.02 in
+recall@10 and nDCG@10 against the committed baseline and requiring zero tenant
+leakage and ACL bypass in the report. Faithfulness, citation precision,
+unsupported-answer rate, and correct abstention are reported without thresholds.
 
-The first successful GitHub Actions smoke run is still required to close R-031 and
-confirm the hosted service wiring. Live Anthropic answer quality, latency, and cost
-remain outside this deterministic gate.
+The scheduled `eval-full` workflow runs all 320 items and four configured
+retrieval strategies and retains the report. Both workflows use extractive
+fallback. T-408 reported a nonzero ACL-bypass value for both chunking variants
+and traced it to the injection slice. [Chunking experiment](#adr-015--fixed-token-remains-the-production-chunking-default)
+
+Hosted smoke comparison and threshold enforcement passed, resolving R-031.
+Live-model release measurements remain open.
+[Hosted smoke evidence](../execution/test_evidence.md#e-019--milestone-a-validation-and-github-reconciliation-2026-11-09) ·
+[Evaluation guide](../guides/evaluation.md)
 
 ## 12. Cost, Quotas & Observability
 

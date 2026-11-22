@@ -1068,3 +1068,37 @@ new paid evaluation.
 No fresh integration, frontend, container, migration or live evaluation run was
 performed for this documentation-only reconciliation. Historical and hosted test
 results above are explicitly attributed to their original revisions and runs.
+
+## E-020 — November 21 scheduled evaluation
+
+GitHub Actions metadata confirms that scheduled run
+[44898272585](https://github.com/fsoaz/enterprise-rag/actions/runs/44898272585)
+completed successfully on November 21, 2026, on `main` at
+`e08794c6da6d623b20f5682f2d0828d3e8bc00b8`. Job `136828494840` reports
+success for both the complete eight-slice comparison and the report
+publication step. Artifact `14704198966` (`eval-full-44898272585`) was
+published with expiry on December 21, 2026.
+
+The workflow at that revision uses `INFERENCE_BACKEND=stub` and the Anthropic
+key placeholder. It runs the 320-item comparison across four strategies and
+publishes the report without applying the smoke thresholds. This entry is based
+on job and artifact metadata. Real-weights retrieval quality, live answer
+quality and adversarial outcomes, latency, and cost remain open.
+[Evaluation guide](../guides/evaluation.md)
+
+## E-021 — Evaluation documentation verification (2026-11-22)
+
+- `make lint typecheck` passed using the installed environment. Ruff checked
+  428 files for formatting, Biome checked 28 files, mypy checked 75 files,
+  import-linter kept all seven contracts, and TypeScript passed.
+- The sandboxed `make test` stalled entering FastAPI's in-process test client.
+  The offline retry outside the sandbox passed with **170 passed, 1 skipped,
+  26 deselected**. It used the Anthropic placeholder and a local database
+  socket path with no database service.
+- The guide's shell syntax, retrieval flags, run request examples, and listed
+  OpenAPI routes passed offline checks. The registration example generated a
+  body that validated against the API schema with 320 unique items in eight
+  slices. Relative links and heading anchors resolved. `git diff --check` passed.
+
+The live validation walkthrough remains unexecuted. Hosted review covered run,
+job, and artifact metadata for E-020. No live evaluation or benchmark ran.

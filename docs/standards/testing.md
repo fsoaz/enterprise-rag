@@ -16,7 +16,7 @@ A RAG system fails quietly. Retrieval gets slightly worse, an ACL filter is drop
 | **Integration** | Real Postgres and Redis in a disposable database. Real SQL, real migrations. | < 5 min | Every commit |
 | **Contract** | Committed OpenAPI schema vs. implementation; generated TS types vs. schema | < 30 s | Every commit |
 | **Security** *(deterministic)* | Tenant isolation, ACL correctness, log hygiene, tool authorization, injection **contract** tests with mocked model responses | < 2 min | Every commit — **never skipped** |
-| **Adversarial** *(probabilistic)* | Live injection corpus against real models | ~10 min | Nightly and pre-release |
+| **Adversarial** *(probabilistic, proposed)* | Live injection corpus against real models | ~10 min | Target cadence is nightly and pre-release |
 | **E2E** | Playwright against the full Compose stack | < 10 min | Pre-merge |
 | **Eval** | Offline quality gates on the golden set | smoke < 5 min / full ~30 min | Smoke per PR, full nightly |
 | **Load** | k6 against staging | ~15 min | Pre-release |
@@ -136,7 +136,9 @@ run had polluted.
 
 **This suite is mandatory and never skipped, not even to unblock a hotfix.** Two of its assertions are release gates with a value of zero.
 
-Everything in § 6.1–6.5 is **deterministic**: given the same code it produces the same verdict every run, so it is a legitimate per-commit merge gate. The probabilistic half — measuring whether a real model actually resists a real injection — lives in § 7.5 and runs nightly. Mixing the two would give a merge gate that fails on model variance and passes on luck.
+The implemented security checks in § 6.1–6.5 are deterministic. The proposed
+live adversarial tier in § 7.5 measures whether the defenses hold against a real
+model.
 
 ### 6.0 Test the refused request, not the permitted one
 
@@ -218,6 +220,7 @@ cannot be confirmed from the checked-in configuration.
 
 Evaluation reports measure behavior on the golden dataset. Deterministic CI uses stub
 inference and extractive fallback; live-model quality requires a separate measured run.
+[Evaluation guide](../guides/evaluation.md)
 
 ### 7.1 Datasets
 
@@ -271,7 +274,10 @@ current run. Updating a baseline is a deliberate, reviewed commit.
 
 ### 7.5 Adversarial evaluation (probabilistic)
 
-The live half of injection testing: the corpus in `evals/fixtures/injection/` — instruction override, role confusion, fake system markers, encoded payloads, zero-width characters, instructions in table cells and image alt text, and a multi-document coordinated attempt — run against **real models**.
+**Proposed.** This tier evaluates the committed injection fixtures against real
+models. The scheduled GitHub Actions workflow uses stub inference and extractive
+fallback. The cadence and policy below describe the planned live tier.
+[Evaluation guide](../guides/evaluation.md#review-live-adversarial-outcomes)
 
 | Property | Value |
 | --- | --- |
@@ -292,11 +298,12 @@ Any successful injection is triaged as a `critical` finding regardless of the ag
 | Integration | Recorded cassettes; no live calls |
 | Contract | No LLM involved |
 | Security (deterministic) | Fully mocked. No live call, by definition — that is what makes it a merge gate. |
-| Adversarial (probabilistic) | **Live calls.** Nightly and pre-release only. |
+| Adversarial (probabilistic, proposed) | Live calls on the target nightly and pre-release cadence |
 | E2E | Cassettes by default; a live-mode flag exists for manual verification |
-| **Eval** | **Live calls.** This is the only tier that spends money, and it is the point of the tier. |
+| **Eval** | Stub inference and extractive fallback in hosted CI. Live generation and judging require an approved run. |
 
-**Not yet implemented:** cassettes live in `tests/cassettes/` and are regenerated deliberately, never automatically. A stale cassette that hides a real API change is caught by the nightly eval run.
+**Proposed:** store cassettes in `tests/cassettes/` and regenerate them deliberately.
+The scheduled deterministic workflow exercises the local service path.
 
 **The embedder is also a source of nondeterminism, and it is pinned the same way.** CI and
 `make test-integration` set `INFERENCE_BACKEND=stub`, which returns SHA-256-derived unit
@@ -385,8 +392,8 @@ grants (R-029, R-071).
 Implemented on main pushes and pull requests (independent jobs):
 lint | typecheck (+ contract + Next build) | unit | web-test | integration-db | container-build
 
-Evaluation workflows:
-eval-smoke | scheduled eval-full | e2e | adversarial | pre-release load
+Implemented evaluation workflows:
+eval-smoke | scheduled eval-full
 ```
 
 | Stage | Job | Blocks merge | Notes |
@@ -399,11 +406,11 @@ eval-smoke | scheduled eval-full | e2e | adversarial | pre-release load
 | integration | `integration-db` | Yes | Postgres + Redis services, `enterprise_rag_test`, plus a real `inference` process on `INFERENCE_BACKEND=stub` |
 | migrations | `integration-db` | Yes | `upgrade head` → `downgrade -1` → `upgrade head` → seed, from an empty database |
 | **security** (deterministic) | `unit` / `integration-db` | Yes | Never skipped. Fully mocked — no live model call, which is what makes it a legitimate gate. |
-| eval-smoke | `eval-smoke` | Yes | Pull requests and pushes to `main`; deterministic 48-item stub-inference run across all eight slices, compared with `evals/baselines/t407-smoke.json`. Gates `recall@10`, `nDCG@10`, tenant leakage, and ACL bypass; answer metrics are report-only ([§ 7.2](#72-gates)). Hosted first-green evidence is pending for R-031. |
+| eval-smoke | `eval-smoke` | Yes | Pull requests and pushes to `main`. The 48-item deterministic comparison gates `recall@10`, `nDCG@10`, tenant leakage, and ACL bypass. Answer metrics are report-only. [Gate details](#72-gates) · [Hosted evidence](../execution/test_evidence.md#e-019--milestone-a-validation-and-github-reconciliation-2026-11-09) |
 | build | `container-build` | See note below | Builds API/worker, inference, and web images; checks Compose configuration; imports `api.main`, `worker.tasks.eval`, and the judge rubric inside the built API/worker image (R-124). `next build` also runs in `typecheck`. No image publishing or deployment. |
 | e2e | — | — | Not wired |
 | eval-full | `eval-full` | No (reports) | Scheduled full 320-item, eight-slice run with four configured strategies; retains the report and makes no paid model calls. |
-| **adversarial** (probabilistic) | — | **No** | Nightly and pre-release. Blocks **release**, not merge — see § 7.5. Not wired |
+| **adversarial** (probabilistic) | — | **No** | Proposed nightly and pre-release tier with a release gate. [Policy](#75-adversarial-evaluation-probabilistic) |
 | load | — | No | Pre-release, manual |
 
 Rows without a job do not exist. They remain in the table when they describe an intentional

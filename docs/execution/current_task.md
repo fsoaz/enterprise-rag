@@ -7,7 +7,11 @@
 
 ## Active
 
-No implementation task is in progress. Validation/GitHub reconciliation completed
+No implementation task is in progress. The November 22 documentation update
+recorded the November 21 scheduled run and added the
+[live validation guide](../guides/evaluation.md).
+
+Validation/GitHub reconciliation completed
 2026-11-09 against local HEAD and GitHub `main` at `353820d`.
 See [E-019](./test_evidence.md#e-019--milestone-a-validation-and-github-reconciliation-2026-11-09).
 
@@ -21,11 +25,12 @@ T-410/T-411 and T-412 documentation edits are also merged; earlier statements th
 they were only local or uncommitted are superseded. T-412's guide walkthrough
 acceptance criterion remains unverified; CI does not exercise that walkthrough.
 
-Scheduled full evaluation
-[42611175399](https://github.com/fsoaz/enterprise-rag/actions/runs/42611175399)
-passed on the same `main` SHA on 2026-11-09. This is deterministic stub evidence.
-The scheduled workflow does not invoke `evals.harness.gate`; its success is not the
-basis for closing R-031 or a claim of live-model quality.
+Scheduled full evaluation ran successfully on November 9 at `353820d` and on
+November 21 at `e08794c`. Both runs used stub inference and extractive fallback.
+The scheduled workflow publishes the comparison. R-031 was closed on the
+strength of the separately enforced smoke thresholds.
+[November 9 evidence](./test_evidence.md#e-019--milestone-a-validation-and-github-reconciliation-2026-11-09) ·
+[November 21 evidence](./test_evidence.md#e-020--november-21-scheduled-evaluation)
 
 Milestone A remains incomplete. Real-weights strategy comparison, live generation,
 judging, injection rate, latency/cost evidence, and outstanding roadmap exit

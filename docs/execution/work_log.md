@@ -4,6 +4,20 @@
 > One entry per completed task. Never edit or delete a past entry; correct it with a new one that says what changed.
 > **Related:** [current_task.md](./current_task.md) · [test_evidence.md](./test_evidence.md) · [review_notes.md](./review_notes.md)
 
+## 2026-11-22 — Evaluation documentation and live validation guide
+
+Updated the README, architecture, roadmap, and testing standards to document the
+enforced smoke gate and the scheduled full comparison. Recorded the November 21
+workflow and artifact metadata, and added a guide for real-weights retrieval,
+live answer and adversarial evaluation, and chat latency and cost.
+[Scheduled evidence](./test_evidence.md#e-020--november-21-scheduled-evaluation) ·
+[Evaluation guide](../guides/evaluation.md)
+
+Lint, type checks, and offline documentation checks passed. The unit suite
+passed outside the sandbox with 170 passed and one skipped. Milestone A live
+measurements remain open.
+[Verification](./test_evidence.md#e-021--evaluation-documentation-verification-2026-11-22)
+
 ## 2026-11-09 — Milestone A validation and GitHub reconciliation
 
 Matched T-413 and T-407/R-031 acceptance criteria to merged commits and fresh

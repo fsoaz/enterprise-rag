@@ -230,7 +230,9 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
   Unit coverage injects degraded metric reports; a hosted end-to-end retrieval mutation
   has not been verified, so this broader exit criterion remains open.
 - [x] Cross-tenant leakage and ACL bypass both measure **0** on the `permission` slice — `acme-viewer` retrieves only the restricted document, `acme-member` retrieves everything except it
-- [ ] Injection success rate ≤ 1% on the `injection` slice — not measurable without a real `ANTHROPIC_API_KEY`; retrieval on that slice is scored, generation is not
+- [ ] Injection success rate ≤ 1% on the `injection` slice — requires observed
+  outcomes with live generation. The deterministic evaluation scores retrieval
+  behavior on this slice. [Live adversarial review](../guides/evaluation.md#review-live-adversarial-outcomes)
 - [x] Q-1 is decided and recorded as [ADR-015](./architecture.md#adr-015--fixed-token-remains-the-production-chunking-default); Q-2 remains open for T-409
 
 > **Status note (2026-07-25, superseded — `as_of` retrieval now exists and the dataset has 320 items).** The harness itself is real: it ingests `evals/fixtures` through the worker pipeline and calls `retrieve()` per item as the item's `acting_user`. It replaced a version that scored `gold_chunk_ids` against themselves and reported 1.0 on metrics it never computed (R-018). Two slices now show honest failures — `versioned` at 0.50 because retrieval has no `as_of` filter (R-030), and `unanswerable` at 0.00 by construction. Dataset volume is also well short of the "minimum 40 items per slice" deliverable: 14 items total.
@@ -256,8 +258,15 @@ Two items sit in Milestone A that a purely minimal cut would defer, and both are
 > T-411 commits queued runs before Celery publication, removes the legacy two-run
 > comparison route and unwired configuration, and makes answer metrics report-only
 > while retrieval and security gates stay enforced. Local evidence is E-015 and
-> E-016. Hosted CI (R-031) and live-model quality remain unmeasured, and T-409 is
-> still the remaining Phase 4 experiment.
+> E-016. T-409 remains the Phase 4 experiment for Q-2.
+
+> **Status note (2026-11-22).** Hosted smoke comparison and threshold enforcement
+> passed on the fix PR and on `main`, resolving R-031. The November 21 scheduled
+> workflow completed the full deterministic comparison and published its report.
+> Real-weights retrieval and live-model release measurements remain open.
+> [Hosted smoke evidence](../execution/test_evidence.md#e-019--milestone-a-validation-and-github-reconciliation-2026-11-09) ·
+> [Scheduled evidence](../execution/test_evidence.md#e-020--november-21-scheduled-evaluation) ·
+> [Evaluation guide](../guides/evaluation.md)
 
 **Stories:** KW-5, PA-4
 
